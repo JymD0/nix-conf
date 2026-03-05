@@ -17,6 +17,9 @@ warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 err()     { echo -e "${RED}[x]${NC} $*"; exit 1; }
 header()  { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 
+# State file persists answers across re-runs / crashes
+STATE_FILE="/etc/nixos/.setup-state"
+
 # ============================================================
 header "NixOS FW16 Setup"
 # ============================================================
@@ -28,17 +31,54 @@ header "NixOS FW16 Setup"
 header "Step 1: Collect configuration values"
 # ============================================================
 
-read -rp "$(echo -e "${BOLD}Hostname${NC} (e.g. fw16): ")" HOSTNAME
-[[ -z "$HOSTNAME" ]] && err "Hostname cannot be empty"
+if [[ -f "$STATE_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$STATE_FILE"
+  warn "Loaded saved values from $STATE_FILE:"
+  echo "  Hostname : $HOSTNAME"
+  echo "  Username : $USERNAME"
+  echo "  Full name: $FULLNAME"
+  echo "  Email    : $EMAIL"
+  echo ""
+  read -rp "Use these saved values? [Y/n] " USE_SAVED
+  if [[ "$USE_SAVED" =~ ^[Nn]$ ]]; then
+    log "Re-entering values ..."
+    rm -f "$STATE_FILE"
+  else
+    log "Using saved values."
+  fi
+fi
 
-read -rp "$(echo -e "${BOLD}Username${NC} (your login user): ")" USERNAME
-[[ -z "$USERNAME" ]] && err "Username cannot be empty"
+# Only prompt for values that aren't already set
+if [[ -z "${HOSTNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Hostname${NC} (e.g. fw16): ")" HOSTNAME
+  [[ -z "$HOSTNAME" ]] && err "Hostname cannot be empty"
+fi
 
-read -rp "$(echo -e "${BOLD}Full name${NC} (for git, e.g. Jane Doe): ")" FULLNAME
-[[ -z "$FULLNAME" ]] && err "Full name cannot be empty"
+if [[ -z "${USERNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Username${NC} (your login user): ")" USERNAME
+  [[ -z "$USERNAME" ]] && err "Username cannot be empty"
+fi
 
-read -rp "$(echo -e "${BOLD}Email${NC} (for git & SSH key): ")" EMAIL
-[[ -z "$EMAIL" ]] && err "Email cannot be empty"
+if [[ -z "${FULLNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Full name${NC} (for git, e.g. Jane Doe): ")" FULLNAME
+  [[ -z "$FULLNAME" ]] && err "Full name cannot be empty"
+fi
+
+if [[ -z "${EMAIL:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Email${NC} (for git & SSH key): ")" EMAIL
+  [[ -z "$EMAIL" ]] && err "Email cannot be empty"
+fi
+
+# Persist to state file immediately after collection
+cat > "$STATE_FILE" <<EOF
+HOSTNAME="$HOSTNAME"
+USERNAME="$USERNAME"
+FULLNAME="$FULLNAME"
+EMAIL="$EMAIL"
+EOF
+chmod 600 "$STATE_FILE"
+log "Values saved to $STATE_FILE"
 
 echo ""
 log "Will configure:"
@@ -121,7 +161,6 @@ HOME_DIR="/home/$USERNAME"
 # /run/current-system/sw/bin/bash is the stable symlink to use.
 NIXOS_BASH="/run/current-system/sw/bin/bash"
 if [[ ! -x "$NIXOS_BASH" ]]; then
-  # Fallback: find bash via which
   NIXOS_BASH="$(which bash)"
 fi
 
@@ -207,6 +246,10 @@ fi
 # ============================================================
 header "All done!"
 # ============================================================
+
+# Clean up state file on successful completion
+rm -f "$STATE_FILE"
+log "State file removed (setup complete)."
 
 echo ""
 echo -e "${GREEN}${BOLD}Setup complete.${NC} Here's what to do next:"
