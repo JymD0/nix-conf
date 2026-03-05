@@ -33,8 +33,8 @@
     # Apps
     discord
 
-    # Fonts
-    noto-fonts-emoji
+    # Fonts (renamed in recent nixpkgs)
+    noto-fonts-color-emoji
 
     # SSH & File Transfer
     termscp
