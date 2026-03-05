@@ -1,9 +1,15 @@
-{ config, pkgs, ... }:
+{ config, pkgs, lib, ... }:
 
 {
   home.username = "yourUsername";
   home.homeDirectory = "/home/yourUsername";
   home.stateVersion = "24.11";
+
+  # Let Home Manager manage itself
+  programs.home-manager.enable = true;
+
+  # Suppress nixpkgs version mismatch warnings
+  home.enableNixpkgsReleaseCheck = false;
 
   home.packages = with pkgs; [
     # Screenshots
@@ -33,9 +39,6 @@
     # Apps
     discord
 
-    # Fonts (renamed in recent nixpkgs)
-    noto-fonts-color-emoji
-
     # SSH & File Transfer
     termscp
     sshpass
@@ -43,6 +46,31 @@
     # Claude Code dependency
     nodejs_22
   ];
+
+  # ─── Fonts ─────────────────────────────────────────────────────────────────────
+  fonts.fontconfig.enable = true;
+
+  home.packages = lib.mkAfter (with pkgs; [
+    noto-fonts-color-emoji
+    jetbrains-mono
+  ]);
+
+  # ─── XDG dirs ──────────────────────────────────────────────────────────────────
+  xdg = {
+    enable = true;
+    userDirs = {
+      enable = true;
+      createDirectories = true;
+      desktop    = "${config.home.homeDirectory}/Desktop";
+      documents  = "${config.home.homeDirectory}/Documents";
+      download   = "${config.home.homeDirectory}/Downloads";
+      music      = "${config.home.homeDirectory}/Music";
+      pictures   = "${config.home.homeDirectory}/Pictures";
+      publicShare = "${config.home.homeDirectory}/Public";
+      templates  = "${config.home.homeDirectory}/Templates";
+      videos     = "${config.home.homeDirectory}/Videos";
+    };
+  };
 
   # ─── Kitty Terminal ───────────────────────────────────────────────────────────
   programs.kitty = {
@@ -306,6 +334,4 @@
       package = pkgs.gnome-themes-extra;
     };
   };
-
-  programs.home-manager.enable = true;
 }

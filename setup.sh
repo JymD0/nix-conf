@@ -112,17 +112,7 @@ fi
 log "Nix found: $(nix --version)"
 
 # ============================================================
-header "Step 6: Build and switch"
-# ============================================================
-
-# NIX_CONFIG enables flakes for this single invocation without
-# needing --extra-experimental-features (which nixos-rebuild doesn't support).
-log "Running nixos-rebuild switch (this will take a while) ..."
-NIX_CONFIG="experimental-features = nix-command flakes" \
-  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
-
-# ============================================================
-header "Step 7: Create user if not exists"
+header "Step 6: Create user if not exists"
 # ============================================================
 
 HOME_DIR="/home/$USERNAME"
@@ -137,28 +127,31 @@ else
 fi
 
 # ============================================================
-header "Step 8: Create standard home directories (XDG)"
+header "Step 7: Build and switch"
 # ============================================================
 
-log "Creating standard home directories for $USERNAME ..."
+# NIX_CONFIG enables flakes for this single invocation without
+# needing --extra-experimental-features (which nixos-rebuild doesn't support).
+# Home Manager will create ~/.config and XDG dirs during this step.
+log "Running nixos-rebuild switch (this will take a while) ..."
+NIX_CONFIG="experimental-features = nix-command flakes" \
+  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
 
-XDG_DIRS=(
-  "Desktop"
-  "Documents"
-  "Downloads"
-  "Music"
-  "Pictures"
-  "Public"
-  "Templates"
-  "Videos"
-  ".config"
-  ".local/share"
+# ============================================================
+header "Step 8: Create remaining home directories"
+# ============================================================
+
+# NOTE: .config is intentionally excluded — Home Manager owns it.
+# xdg.userDirs.createDirectories in home.nix handles Desktop/Downloads/etc.
+# We only add dirs that Home Manager doesn't create.
+log "Creating extra home directories for $USERNAME ..."
+
+EXTRA_DIRS=(
   ".local/bin"
-  ".cache"
   ".ssh"
 )
 
-for dir in "${XDG_DIRS[@]}"; do
+for dir in "${EXTRA_DIRS[@]}"; do
   TARGET="$HOME_DIR/$dir"
   if [[ ! -d "$TARGET" ]]; then
     mkdir -p "$TARGET"
@@ -168,19 +161,7 @@ for dir in "${XDG_DIRS[@]}"; do
   fi
 done
 
-# Create XDG user-dirs config
-cat > "$HOME_DIR/.config/user-dirs.dirs" <<EOF
-XDG_DESKTOP_DIR="\$HOME/Desktop"
-XDG_DOCUMENTS_DIR="\$HOME/Documents"
-XDG_DOWNLOAD_DIR="\$HOME/Downloads"
-XDG_MUSIC_DIR="\$HOME/Music"
-XDG_PICTURES_DIR="\$HOME/Pictures"
-XDG_PUBLICSHARE_DIR="\$HOME/Public"
-XDG_TEMPLATES_DIR="\$HOME/Templates"
-XDG_VIDEOS_DIR="\$HOME/Videos"
-EOF
-
-# Fix ownership of entire home directory
+# Fix ownership and permissions
 chown -R "$USERNAME:users" "$HOME_DIR"
 chmod 700 "$HOME_DIR/.ssh"
 log "Ownership and permissions set."
