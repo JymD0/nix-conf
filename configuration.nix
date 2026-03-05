@@ -3,6 +3,9 @@
 {
   imports = [ ./hardware-configuration.nix ];
 
+  # Allow unfree packages (VS Code, Discord, etc.)
+  nixpkgs.config.allowUnfree = true;
+
   # Bootloader
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
@@ -56,7 +59,8 @@
     enable = true;
     settings = {
       default_session = {
-        command = "${pkgs.greetd.tuigreet}/bin/tuigreet --time --cmd Hyprland";
+        # tuigreet was moved out of greetd attrset in recent nixpkgs
+        command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd Hyprland";
         user = "greeter";
       };
     };
