@@ -11,6 +11,10 @@
   # Suppress nixpkgs version mismatch warnings
   home.enableNixpkgsReleaseCheck = false;
 
+  # ─── Fonts ─────────────────────────────────────────────────────────────────────
+  fonts.fontconfig.enable = true;
+
+  # ─── Packages ───────────────────────────────────────────────────────────────────
   home.packages = with pkgs; [
     # Screenshots
     grim
@@ -39,6 +43,10 @@
     # Apps
     discord
 
+    # Fonts
+    noto-fonts-color-emoji
+    jetbrains-mono
+
     # SSH & File Transfer
     termscp
     sshpass
@@ -46,14 +54,6 @@
     # Claude Code dependency
     nodejs_22
   ];
-
-  # ─── Fonts ─────────────────────────────────────────────────────────────────────
-  fonts.fontconfig.enable = true;
-
-  home.packages = lib.mkAfter (with pkgs; [
-    noto-fonts-color-emoji
-    jetbrains-mono
-  ]);
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
   xdg = {
