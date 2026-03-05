@@ -117,11 +117,19 @@ header "Step 6: Create user if not exists"
 
 HOME_DIR="/home/$USERNAME"
 
+# On NixOS, bash lives in the Nix store, not /bin/bash.
+# /run/current-system/sw/bin/bash is the stable symlink to use.
+NIXOS_BASH="/run/current-system/sw/bin/bash"
+if [[ ! -x "$NIXOS_BASH" ]]; then
+  # Fallback: find bash via which
+  NIXOS_BASH="$(which bash)"
+fi
+
 if id "$USERNAME" &>/dev/null; then
   log "User '$USERNAME' already exists."
 else
-  log "Creating user '$USERNAME' ..."
-  useradd -m -G networkmanager,wheel,video,audio -s /bin/bash "$USERNAME"
+  log "Creating user '$USERNAME' with shell $NIXOS_BASH ..."
+  useradd -m -G networkmanager,wheel,video,audio -s "$NIXOS_BASH" "$USERNAME"
   warn "Set a password for '$USERNAME':"
   passwd "$USERNAME"
 fi
@@ -141,7 +149,7 @@ NIX_CONFIG="experimental-features = nix-command flakes" \
 header "Step 8: Create remaining home directories"
 # ============================================================
 
-# NOTE: .config is intentionally excluded — Home Manager owns it.
+# NOTE: .config is intentionally excluded - Home Manager owns it.
 # xdg.userDirs.createDirectories in home.nix handles Desktop/Downloads/etc.
 # We only add dirs that Home Manager doesn't create.
 log "Creating extra home directories for $USERNAME ..."
