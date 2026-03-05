@@ -102,24 +102,24 @@ else
 fi
 
 # ============================================================
-header "Step 5: Enable flakes temporarily (if needed)"
+header "Step 5: Verify Nix is present"
 # ============================================================
 
 if ! nix --version &>/dev/null; then
   err "Nix not found. Is NixOS installed?"
 fi
 
-NIX_FLAGS="--extra-experimental-features 'nix-command flakes'"
-log "Using experimental features flag for this build."
+log "Nix found: $(nix --version)"
 
 # ============================================================
 header "Step 6: Build and switch"
 # ============================================================
 
+# NIX_CONFIG enables flakes for this single invocation without
+# needing --extra-experimental-features (which nixos-rebuild doesn't support).
 log "Running nixos-rebuild switch (this will take a while) ..."
-nixos-rebuild switch \
-  --extra-experimental-features 'nix-command flakes' \
-  --flake "/etc/nixos#$HOSTNAME"
+NIX_CONFIG="experimental-features = nix-command flakes" \
+  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
 
 # ============================================================
 header "Step 7: Create user if not exists"
@@ -171,11 +171,11 @@ header "All done!"
 echo ""
 echo -e "${GREEN}${BOLD}Setup complete.${NC} Here's what to do next:"
 echo ""
-echo -e "  1. ${BOLD}Reboot${NC}              → sudo reboot"
-echo -e "  2. ${BOLD}Log in${NC}              → via tuigreet, select Hyprland"
-echo -e "  3. ${BOLD}Authenticate Claude${NC} → claude login"
-echo -e "  4. ${BOLD}Copy SSH key${NC}        → ssh-copy-id <your-server>"
-echo -e "  5. ${BOLD}Add SSH hosts${NC}       → edit /etc/nixos/home.nix (programs.ssh.matchBlocks)"
+echo -e "  1. ${BOLD}Reboot${NC}              \u2192 sudo reboot"
+echo -e "  2. ${BOLD}Log in${NC}              \u2192 via tuigreet, select Hyprland"
+echo -e "  3. ${BOLD}Authenticate Claude${NC} \u2192 claude login"
+echo -e "  4. ${BOLD}Copy SSH key${NC}        \u2192 ssh-copy-id <your-server>"
+echo -e "  5. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/home.nix (programs.ssh.matchBlocks)"
 echo -e "                         then run: rebuild"
 echo ""
 warn "hardware-configuration.nix is machine-specific and not committed to the repo."
