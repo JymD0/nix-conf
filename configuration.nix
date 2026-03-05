@@ -32,6 +32,12 @@
   time.timeZone = "Europe/Vienna";
   i18n.defaultLocale = "en_US.UTF-8";
 
+  # Keyboard layout (system-wide, English US)
+  services.xserver.xkb = {
+    layout = "us";
+    variant = "";
+  };
+
   # Audio
   security.rtkit.enable = true;
   services.pipewire = {
@@ -82,6 +88,7 @@
     curl
     vim
     wl-clipboard
+    nodejs_22  # needed by setup.sh for Claude Code (npm install -g)
     zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 

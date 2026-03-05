@@ -51,7 +51,7 @@
     termscp
     sshpass
 
-    # Claude Code dependency
+    # Claude Code dependency (also in system packages for setup.sh)
     nodejs_22
   ];
 
@@ -192,6 +192,7 @@
 
       input = {
         kb_layout = "us";
+        kb_variant = "";
         follow_mouse = 1;
         sensitivity = 0;
         touchpad = {
@@ -216,9 +217,12 @@
           size    = 3;
           passes  = 1;
         };
-        drop_shadow        = true;
-        shadow_range       = 4;
-        shadow_render_power = 3;
+        # drop_shadow and shadow_* were renamed in Hyprland v0.41+
+        shadow = {
+          enabled = true;
+          range   = 4;
+          render_power = 3;
+        };
       };
 
       animations = {
@@ -264,9 +268,6 @@
 
         # Clipboard history
         "$mod, X, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
-
-        # Emoji picker
-        "$mod, period, exec, wofi-emoji"
 
         # Focus
         "$mod, left,  movefocus, l"
