@@ -1,1 +1,80 @@
-IyBuaXgtY29uZgoKTml4T1MgY29uZmlndXJhdGlvbiBmb3IgRnJhbWV3b3JrIExhcHRvcCAxNiAoQU1EIDcwNDApLgoKIyMgU3RydWN0dXJlCgpgYGAKLgrilJxilIAilIAgZmxha2Uubml4ICAgICAgICAgICAgICAgIyBGbGFrZSBpbnB1dHMgJiBvdXRwdXRzCuKUnOKUgOKUgCBjb25maWd1cmF0aW9uLm5peCAgICAgICAjIFN5c3RlbS1sZXZlbCBjb25maWcgKGhhcmR3YXJlLCBzZXJ2aWNlcywgdXNlcnMpCuKUnOKUgOKUgCBob21lLm5peCAgICAgICAgICAgICAgICAjIFVzZXItbGV2ZWwgY29uZmlnIHZpYSBIb21lIE1hbmFnZXIK4pSc4pSA4pSAIGhhcmR3YXJlLWNvbmZpZ3VyYXRpb24ubml4ICAjIEdlbmVyYXRlZCDigJQgZG8gbm90IGVkaXQgbWFudWFsbHkK4pSU4pSA4pSAIFJFQURNRS5tZApgYGAKCiMjIFNldHVwCgojIyMgRmlyc3QtdGltZSBpbnN0YWxsCgpgYGBiYXNoCiMgMS4gQ2xvbmUgdGhpcyByZXBvCmdpdCBjbG9uZSBnaXRAZ2l0aHViLmNvbTpKeW1EMC9uaXgtY29uZi5naXQgL2V0Yy9uaXhvcwoKIyAyLiBHZW5lcmF0ZSBoYXJkd2FyZSBjb25maWcgZm9yIHRoaXMgbWFjaGluZQpzdWRvIG5peG9zLWdlbmVyYXRlLWNvbmZpZyAtLXNob3ctaGFyZHdhcmUtY29uZmlnID4gL2V0Yy9uaXhvcy9oYXJkd2FyZS1jb25maWd1cmF0aW9uLm5peAoKIyAzLiBFZGl0IHBsYWNlaG9sZGVycwojICAgIGZsYWtlLm5peCAgICAgICAgLT4geW91ckhvc3RuYW1lCiMgICAgY29uZmlndXJhdGlvbi5uaXggLT4geW91ckhvc3RuYW1lLCB5b3VyVXNlcm5hbWUKIyAgICBob21lLm5peCAgICAgICAgICAtPiB5b3VyVXNlcm5hbWUsIGdpdCBuYW1lL2VtYWlsLCBTU0ggaG9zdHMKCiMgNC4gQnVpbGQgJiBzd2l0Y2gKc3VkbyBuaXhvcy1yZWJ1aWxkIHN3aXRjaCAtLWZsYWtlIC9ldGMvbml4b3MjeW91ckhvc3RuYW1lCgojIDUuIEluc3RhbGwgQ2xhdWRlIENvZGUgKG9uZS10aW1lLCBpbXBlcmF0aXZlKQpucG0gaW5zdGFsbCAtZyBAYW50aHJvcGljLWFpL2NsYXVkZS1jb2RlCmNsYXVkZSBsb2dpbgoKIyA2LiBHZW5lcmF0ZSBTU0gga2V5IChpZiBuZWVkZWQpCnNzaC1rZXlnZW4gLXQgZWQyNTUxOSAtQyAieW91ci5lbWFpbEBleGFtcGxlLmNvbSIKYGBgCgojIyMgVXBkYXRpbmcKCmBgYGJhc2gKIyBRdWljayByZWJ1aWxkIGFmdGVyIGNvbmZpZyBjaGFuZ2VzCnJlYnVpbGQKCiMgRnVsbCBmbGFrZSB1cGRhdGUgKyByZWJ1aWxkCnVwZGF0ZQpgYGAKCiMjIEtleSBiaW5kaW5ncyAoSHlwcmxhbmQpCgp8IEtleWJpbmQgfCBBY3Rpb24gfAp8LS0tfC0tLXwKfCBgU3VwZXIgKyBRYCB8IE9wZW4gS2l0dHkgdGVybWluYWwgfAp8IGBTdXBlciArIFJgIHwgQXBwIGxhdW5jaGVyIChmdXp6ZWwpIHwKfCBgU3VwZXIgKyBCYCB8IFplbiBCcm93c2VyIHwKfCBgU3VwZXIgKyBFYCB8IEZpbGUgbWFuYWdlciAoTmVtbykgfAp8IGBTdXBlciArIENgIHwgS2lsbCBhY3RpdmUgd2luZG93IHwKfCBgU3VwZXIgKyBWYCB8IFRvZ2dsZSBmbG9hdGluZyB8CnwgYFN1cGVyICsgWGAgfCBDbGlwYm9hcmQgaGlzdG9yeSB8CnwgYFN1cGVyICsgLmAgfCBFbW9qaSBwaWNrZXIgfAp8IGBTdXBlciArIFNoaWZ0ICsgRGAgfCBEaXNjb3JkIHwKfCBgU3VwZXIgKyBTaGlmdCArIENgIHwgVlMgQ29kZSB8CnwgYFN1cGVyICsgU2hpZnQgKyBUYCB8IEZpbGUgdHJhbnNmZXIgKHRlcm1zY3ApIHwKfCBgUHJpbnRgIHwgU2NyZWVuc2hvdCBhcmVhIChjb3B5KSB8CnwgYFN1cGVyICsgUHJpbnRgIHwgU2NyZWVuc2hvdCBvdXRwdXQgKGNvcHkpIHwKfCBgU3VwZXIgKyBTaGlmdCArIFByaW50YCB8IFNjcmVlbnNob3QgYXJlYSAoc2F2ZSB0byB+L1BpY3R1cmVzKSB8CnwgYFN1cGVyICsgMS0wYCB8IFN3aXRjaCB3b3Jrc3BhY2UgfAp8IGBTdXBlciArIFNoaWZ0ICsgMS0wYCB8IE1vdmUgd2luZG93IHRvIHdvcmtzcGFjZSB8Cg==
+# NixOS Configuration — Framework 16 AMD
+
+Declarative NixOS configuration managed with [Nix Flakes](https://nixos.wiki/wiki/Flakes) and [Home Manager](https://github.com/nix-community/home-manager).
+
+## Setup
+
+### 1. Clone this repo
+```bash
+sudo git clone https://github.com/JymD0/nix-conf /etc/nixos
+```
+
+### 2. Generate hardware config
+```bash
+sudo nixos-generate-config --show-hardware-config > /etc/nixos/hardware-configuration.nix
+```
+
+### 3. Edit placeholders
+- `flake.nix` — replace `yourHostname` and `yourUsername`
+- `configuration.nix` — replace `yourHostname` and `yourUsername`
+- `home.nix` — replace `yourUsername`, git name/email, SSH hosts
+
+### 4. Apply
+```bash
+sudo nixos-rebuild switch --flake /etc/nixos#yourHostname
+```
+
+### 5. Install Claude Code (after rebuild)
+```bash
+npm install -g @anthropic-ai/claude-code
+claude login
+```
+
+### 6. Generate SSH key (optional but recommended)
+```bash
+ssh-keygen -t ed25519 -C "your.email@example.com"
+ssh-copy-id your-server  # copies key to hosts defined in programs.ssh.matchBlocks
+```
+
+---
+
+## Keybindings (Hyprland)
+
+| Shortcut | Action |
+|---|---|
+| `Super + Q` | Open Kitty terminal |
+| `Super + C` | Close window |
+| `Super + R` | App launcher (fuzzel) |
+| `Super + B` | Zen Browser |
+| `Super + E` | File manager (Nemo) |
+| `Super + X` | Clipboard history |
+| `Super + .` | Emoji picker |
+| `Super + Shift + T` | File transfer (termscp) |
+| `Super + Shift + D` | Discord |
+| `Super + Shift + C` | VS Code |
+| `Print` | Screenshot area (copy) |
+| `Super + Print` | Screenshot output (copy) |
+| `Super + Shift + Print` | Screenshot area (save to ~/Pictures) |
+| `Super + 1-0` | Switch workspace |
+| `Super + Shift + 1-0` | Move window to workspace |
+| `Super + Mouse drag` | Move window |
+| `Super + Right-click drag` | Resize window |
+
+---
+
+## Structure
+
+```
+/etc/nixos/
+├── flake.nix                  # Inputs and system definition
+├── configuration.nix          # System-level config (hardware, services)
+├── home.nix                   # User-level config (apps, dotfiles, keybinds)
+├── hardware-configuration.nix # Auto-generated — not in repo
+└── README.md
+```
+
+## Update
+```bash
+update   # alias: nix flake update + nixos-rebuild switch
+rebuild  # alias: nixos-rebuild switch
+```
