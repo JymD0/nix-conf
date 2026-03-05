@@ -17,8 +17,8 @@ warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 err()     { echo -e "${RED}[x]${NC} $*"; exit 1; }
 header()  { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 
-# State file persists answers across re-runs / crashes
-STATE_FILE="/etc/nixos/.setup-state"
+# /tmp is always writable; survives crashes but not reboots (which is fine)
+STATE_FILE="/tmp/nixos-setup-state"
 
 # ============================================================
 header "NixOS FW16 Setup"
@@ -44,6 +44,7 @@ if [[ -f "$STATE_FILE" ]]; then
   if [[ "$USE_SAVED" =~ ^[Nn]$ ]]; then
     log "Re-entering values ..."
     rm -f "$STATE_FILE"
+    unset HOSTNAME USERNAME FULLNAME EMAIL
   else
     log "Using saved values."
   fi
@@ -152,37 +153,28 @@ fi
 log "Nix found: $(nix --version)"
 
 # ============================================================
-header "Step 6: Create user if not exists"
+header "Step 6: Build and switch"
+# ============================================================
+
+# NixOS manages users declaratively via users.users in configuration.nix.
+# The rebuild below will create the user automatically - no useradd needed.
+# NIX_CONFIG enables flakes for this single invocation.
+log "Running nixos-rebuild switch (this will take a while) ..."
+NIX_CONFIG="experimental-features = nix-command flakes" \
+  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
+
+# ============================================================
+header "Step 7: Set user password"
 # ============================================================
 
 HOME_DIR="/home/$USERNAME"
 
-# On NixOS, bash lives in the Nix store, not /bin/bash.
-# /run/current-system/sw/bin/bash is the stable symlink to use.
-NIXOS_BASH="/run/current-system/sw/bin/bash"
-if [[ ! -x "$NIXOS_BASH" ]]; then
-  NIXOS_BASH="$(which bash)"
-fi
-
-if id "$USERNAME" &>/dev/null; then
-  log "User '$USERNAME' already exists."
+if passwd -S "$USERNAME" 2>/dev/null | grep -q ' P '; then
+  warn "Password already set for '$USERNAME', skipping."
 else
-  log "Creating user '$USERNAME' with shell $NIXOS_BASH ..."
-  useradd -m -G networkmanager,wheel,video,audio -s "$NIXOS_BASH" "$USERNAME"
   warn "Set a password for '$USERNAME':"
   passwd "$USERNAME"
 fi
-
-# ============================================================
-header "Step 7: Build and switch"
-# ============================================================
-
-# NIX_CONFIG enables flakes for this single invocation without
-# needing --extra-experimental-features (which nixos-rebuild doesn't support).
-# Home Manager will create ~/.config and XDG dirs during this step.
-log "Running nixos-rebuild switch (this will take a while) ..."
-NIX_CONFIG="experimental-features = nix-command flakes" \
-  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
 
 # ============================================================
 header "Step 8: Create remaining home directories"
@@ -190,7 +182,6 @@ header "Step 8: Create remaining home directories"
 
 # NOTE: .config is intentionally excluded - Home Manager owns it.
 # xdg.userDirs.createDirectories in home.nix handles Desktop/Downloads/etc.
-# We only add dirs that Home Manager doesn't create.
 log "Creating extra home directories for $USERNAME ..."
 
 EXTRA_DIRS=(
@@ -208,7 +199,6 @@ for dir in "${EXTRA_DIRS[@]}"; do
   fi
 done
 
-# Fix ownership and permissions
 chown -R "$USERNAME:users" "$HOME_DIR"
 chmod 700 "$HOME_DIR/.ssh"
 log "Ownership and permissions set."
