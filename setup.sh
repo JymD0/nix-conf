@@ -125,6 +125,8 @@ NIX_CONFIG="experimental-features = nix-command flakes" \
 header "Step 7: Create user if not exists"
 # ============================================================
 
+HOME_DIR="/home/$USERNAME"
+
 if id "$USERNAME" &>/dev/null; then
   log "User '$USERNAME' already exists."
 else
@@ -135,10 +137,59 @@ else
 fi
 
 # ============================================================
-header "Step 8: Generate SSH key"
+header "Step 8: Create standard home directories (XDG)"
 # ============================================================
 
-SSH_KEY="/home/$USERNAME/.ssh/id_ed25519"
+log "Creating standard home directories for $USERNAME ..."
+
+XDG_DIRS=(
+  "Desktop"
+  "Documents"
+  "Downloads"
+  "Music"
+  "Pictures"
+  "Public"
+  "Templates"
+  "Videos"
+  ".config"
+  ".local/share"
+  ".local/bin"
+  ".cache"
+  ".ssh"
+)
+
+for dir in "${XDG_DIRS[@]}"; do
+  TARGET="$HOME_DIR/$dir"
+  if [[ ! -d "$TARGET" ]]; then
+    mkdir -p "$TARGET"
+    log "  Created $TARGET"
+  else
+    warn "  Already exists: $TARGET"
+  fi
+done
+
+# Create XDG user-dirs config
+cat > "$HOME_DIR/.config/user-dirs.dirs" <<EOF
+XDG_DESKTOP_DIR="\$HOME/Desktop"
+XDG_DOCUMENTS_DIR="\$HOME/Documents"
+XDG_DOWNLOAD_DIR="\$HOME/Downloads"
+XDG_MUSIC_DIR="\$HOME/Music"
+XDG_PICTURES_DIR="\$HOME/Pictures"
+XDG_PUBLICSHARE_DIR="\$HOME/Public"
+XDG_TEMPLATES_DIR="\$HOME/Templates"
+XDG_VIDEOS_DIR="\$HOME/Videos"
+EOF
+
+# Fix ownership of entire home directory
+chown -R "$USERNAME:users" "$HOME_DIR"
+chmod 700 "$HOME_DIR/.ssh"
+log "Ownership and permissions set."
+
+# ============================================================
+header "Step 9: Generate SSH key"
+# ============================================================
+
+SSH_KEY="$HOME_DIR/.ssh/id_ed25519"
 
 if [[ -f "$SSH_KEY" ]]; then
   warn "SSH key already exists at $SSH_KEY, skipping."
@@ -153,7 +204,7 @@ else
 fi
 
 # ============================================================
-header "Step 9: Install Claude Code"
+header "Step 10: Install Claude Code"
 # ============================================================
 
 if command -v claude &>/dev/null; then
