@@ -20,12 +20,31 @@ header()  { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 # /tmp is always writable; survives crashes but not reboots (which is fine)
 STATE_FILE="/tmp/nixos-setup-state"
 
+RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
+
 # ============================================================
 header "NixOS FW16 Setup"
 # ============================================================
 
 # Must be run as root
 [[ $EUID -ne 0 ]] && err "Please run as root: sudo bash setup.sh"
+
+# ============================================================
+header "Step 0: Fetch missing config files"
+# ============================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+for f in flake.nix configuration.nix home.nix; do
+  if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
+    log "$f not found locally, downloading ..."
+    curl -fsSL "$RAW_BASE/$f" -o "$SCRIPT_DIR/$f" \
+      || err "Failed to download $f — are you connected to the internet?"
+    log "  Downloaded $f"
+  else
+    log "  $f already present, skipping download."
+  fi
+done
 
 # ============================================================
 header "Step 1: Collect configuration values"
@@ -94,8 +113,6 @@ read -rp "Continue? [y/N] " CONFIRM
 # ============================================================
 header "Step 2: Copy config to /etc/nixos"
 # ============================================================
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "$SCRIPT_DIR" != "/etc/nixos" ]]; then
   log "Copying config files to /etc/nixos ..."
