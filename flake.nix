@@ -15,12 +15,17 @@
       url = "github:youwen5/zen-browser-flake";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    hyprland-contrib = {
+      url = "github:hyprwm/contrib";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, ... }: {
+  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, hyprland-contrib, ... }: {
     nixosConfigurations.yourHostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit zen-browser; };
+      specialArgs = { inherit zen-browser hyprland-contrib; };
       modules = [
         # Framework 16 AMD hardware support
         nixos-hardware.nixosModules.framework-16-7040-amd
