@@ -77,23 +77,38 @@
   # Set keyboard layout for Hyprland (Wayland)
   environment.sessionVariables.XKB_DEFAULT_LAYOUT = "de";
 
-  # Enable greetd with tuigreet for Hyprland login
+  # regreet — GTK4 graphical greeter running inside a minimal Hyprland compositor
+  # This gives a proper Wayland login screen that matches the desktop aesthetic.
+  programs.regreet = {
+    enable = true;
+    # GTK settings for the greeter (Dracula dark theme)
+    theme = {
+      name = "Adwaita-dark";
+      package = pkgs.gnome-themes-extra;
+    };
+    font = {
+      name = "JetBrains Mono";
+      size = 14;
+      package = pkgs.jetbrains-mono;
+    };
+    settings = {
+      background = {
+        # Set to your preferred wallpaper path, e.g. a file copied into /etc/nixos
+        # path = "/etc/nixos/wallpaper.jpg";
+        fit = "Cover";
+      };
+      GTK = {
+        application_prefer_dark_theme = true;
+      };
+    };
+  };
+
+  # greetd launches a minimal Hyprland session which regreet renders inside
   services.greetd = {
     enable = true;
-    settings = {
-      default_session = {
-        # tuigreet was moved out of greetd attrset in recent nixpkgs
-        command = builtins.concatStringsSep " " [
-          "${pkgs.tuigreet}/bin/tuigreet"
-          "--time"
-          "--remember"
-          "--asterisks"
-          "--greeting 'Welcome back!'"
-          "--theme 'border=magenta;text=white;prompt=cyan;time=magenta;action=green;button=yellow;container=black;input=white'"
-          "--cmd 'uwsm start hyprland-uwsm'"
-        ];
-        user = "greeter";
-      };
+    settings.default_session = {
+      command = "${pkgs.hyprland}/bin/Hyprland";
+      user = "greeter";
     };
   };
 
