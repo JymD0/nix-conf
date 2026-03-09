@@ -51,12 +51,13 @@
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;
 
-  # Fingerprint reader
-  services.fprintd.enable = true;
+  # Fingerprint reader already enabled via nixos-hardware framework module
+  # (services.fprintd.enable = lib.mkDefault true in framework/16-inch/common)
 
   # Hyprland
   programs.hyprland = {
     enable = true;
+    withUWSM = true; # recommended since NixOS 24.11
     xwayland.enable = true;
   };
 
@@ -88,7 +89,6 @@
     curl
     vim
     wl-clipboard
-    nodejs_22  # needed by setup.sh for Claude Code (npm install -g)
     zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 
@@ -98,6 +98,26 @@
     description = "Your Name";
     extraGroups = [ "networkmanager" "wheel" "video" "audio" ];
   };
+
+  # XDG portals — required for screensharing and file pickers under Hyprland
+  xdg.portal = {
+    enable = true;
+    extraPortals = [
+      pkgs.xdg-desktop-portal-hyprland
+      pkgs.xdg-desktop-portal-gtk
+    ];
+  };
+
+  # Electron apps (VS Code, Discord, etc.) render natively on Wayland
+  environment.sessionVariables.NIXOS_OZONE_WL = "1";
+
+  # Nix store maintenance
+  nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    options = "--delete-older-than 14d";
+  };
+  nix.optimise.automatic = true;
 
   system.stateVersion = "24.11";
 }

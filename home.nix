@@ -26,14 +26,10 @@
     fuzzel
     wofi
 
-    # Shell
-    starship
-
     # File manager
     nemo
 
     # Notifications
-    dunst
     libnotify
 
     # System info
@@ -51,7 +47,7 @@
     termscp
     sshpass
 
-    # Claude Code dependency (also in system packages for setup.sh)
+    # Claude Code (npm install -g @anthropic-ai/claude-code)
     nodejs_22
   ];
 
@@ -163,8 +159,8 @@
   programs.bash = {
     enable = true;
     shellAliases = {
-      rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#yourHostname";
-      update  = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake .#yourHostname";
+      rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#$(hostname)";
+      update  = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake .#$(hostname)";
       scpget  = "termscp";
     };
   };
@@ -174,14 +170,15 @@
   # ─── Hyprland ─────────────────────────────────────────────────────────────────
   wayland.windowManager.hyprland = {
     enable = true;
+    systemd.enable = false; # required when programs.hyprland.withUWSM = true
     settings = {
       monitor = ",preferred,auto,1";
 
       exec-once = [
         "wl-paste --type text --watch cliphist store"
         "wl-paste --type image --watch cliphist store"
-        "dunst"
-        "tailscale up"
+        # dunst is managed as a systemd user service via services.dunst.enable
+        # tailscale up should be run once manually after setup, not on every login
       ];
 
       env = [
@@ -217,7 +214,7 @@
           size    = 3;
           passes  = 1;
         };
-        # drop_shadow and shadow_* were renamed in Hyprland v0.41+
+        # drop_shadow and shadow_* were replaced by shadow {} block in Hyprland v0.45+
         shadow = {
           enabled = true;
           range   = 4;
