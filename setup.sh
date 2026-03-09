@@ -176,6 +176,14 @@ header "Step 6: Build and switch"
 # NixOS manages users declaratively via users.users in configuration.nix.
 # The rebuild below will create the user automatically - no useradd needed.
 # NIX_CONFIG enables flakes for this single invocation.
+
+# Clean old boot entries to prevent "No space left on device" on small EFI partitions
+log "Cleaning old boot entries to free space on /boot ..."
+find /boot/EFI/nixos/ -type f -delete 2>/dev/null || true
+find /boot/loader/entries/ -type f -delete 2>/dev/null || true
+nix-env --delete-generations +1 --profile /nix/var/nix/profiles/system 2>/dev/null || true
+log "Boot partition cleaned."
+
 log "Running nixos-rebuild switch (this will take a while) ..."
 NIX_CONFIG="experimental-features = nix-command flakes" \
   nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
