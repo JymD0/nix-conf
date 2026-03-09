@@ -2,7 +2,20 @@
 
 Declarative NixOS configuration managed with [Nix Flakes](https://nixos.wiki/wiki/Flakes) and [Home Manager](https://github.com/nix-community/home-manager).
 
-## Setup
+## Quick Install
+
+> On a fresh NixOS install. Connect to WiFi first: `nmtui`
+
+```bash
+curl -L https://raw.githubusercontent.com/JymD0/nix-conf/main/setup.sh -o /tmp/setup.sh
+sudo bash /tmp/setup.sh
+```
+
+The script will automatically download all missing config files, prompt for hostname/username/name/email, and set everything up.
+
+---
+
+## Manual Setup
 
 ### 1. Clone this repo
 ```bash
@@ -33,7 +46,7 @@ claude login
 ### 6. Generate SSH key (optional but recommended)
 ```bash
 ssh-keygen -t ed25519 -C "your.email@example.com"
-ssh-copy-id your-server  # copies key to hosts defined in programs.ssh.matchBlocks
+ssh-copy-id your-server
 ```
 
 ---
@@ -48,7 +61,6 @@ ssh-copy-id your-server  # copies key to hosts defined in programs.ssh.matchBloc
 | `Super + B` | Zen Browser |
 | `Super + E` | File manager (Nemo) |
 | `Super + X` | Clipboard history |
-| `Super + .` | Emoji picker |
 | `Super + Shift + T` | File transfer (termscp) |
 | `Super + Shift + D` | Discord |
 | `Super + Shift + C` | VS Code |
