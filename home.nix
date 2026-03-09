@@ -57,6 +57,10 @@
 
     # Claude Code (npm install -g @anthropic-ai/claude-code)
     nodejs_22
+
+    # Wallpaper
+    swww       # animated wallpaper daemon for Wayland
+    waypaper   # GUI frontend for picking / setting wallpapers
   ];
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
@@ -183,6 +187,8 @@
       monitor = ",preferred,auto,1";
 
       exec-once = [
+        "swww-daemon"
+        "waypaper --restore"  # restore last wallpaper on login
         "waybar"
         "kanshi"
         "wl-paste --type text --watch cliphist store"
