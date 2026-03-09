@@ -25,12 +25,20 @@
     cliphist
     fuzzel
     wofi
+    waybar          # status bar
 
     # File manager
     nemo
 
     # Notifications
     libnotify
+
+    # Display management
+    wdisplays       # GUI for managing monitors (position, resolution, scale)
+    kanshi          # auto-switch monitor profiles
+
+    # Lock screen
+    hyprlock
 
     # System info
     fastfetch
@@ -175,10 +183,10 @@
       monitor = ",preferred,auto,1";
 
       exec-once = [
+        "waybar"
+        "kanshi"
         "wl-paste --type text --watch cliphist store"
         "wl-paste --type image --watch cliphist store"
-        # dunst is managed as a systemd user service via services.dunst.enable
-        # tailscale up should be run once manually after setup, not on every login
       ];
 
       env = [
@@ -257,6 +265,7 @@
         "$mod SHIFT, D, exec, discord"
         "$mod SHIFT, C, exec, code"
         "$mod SHIFT, T, exec, kitty termscp"
+        "$mod SHIFT, M, exec, wdisplays"
 
         # Screenshots
         ", PRINT,       exec, grimblast copy area"
@@ -266,11 +275,38 @@
         # Clipboard history
         "$mod, X, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
 
-        # Focus
+        # Fullscreen & layout
+        "$mod, F, fullscreen, 0"
+        "$mod SHIFT, F, fullscreen, 1"       # maximize (keep gaps/bar)
+        "$mod, TAB, workspace, previous"     # quick workspace toggle
+        "$mod, S, togglespecialworkspace, magic"
+        "$mod SHIFT, S, movetoworkspace, special:magic"
+
+        # Lock screen
+        "$mod, L, exec, hyprlock"
+
+        # Center floating window
+        "$mod SHIFT, V, centerwindow,"
+
+        # Focus (arrows)
         "$mod, left,  movefocus, l"
         "$mod, right, movefocus, r"
         "$mod, up,    movefocus, u"
         "$mod, down,  movefocus, d"
+
+        # Focus (vim keys)
+        "$mod, H, movefocus, l"
+        "$mod, K, movefocus, u"
+
+        # Move windows
+        "$mod SHIFT, left,  movewindow, l"
+        "$mod SHIFT, right, movewindow, r"
+        "$mod SHIFT, up,    movewindow, u"
+        "$mod SHIFT, down,  movewindow, d"
+        "$mod SHIFT, H, movewindow, l"
+        "$mod SHIFT, J, movewindow, d"
+        "$mod SHIFT, K, movewindow, u"
+        "$mod SHIFT, L, movewindow, r"
 
         # Workspaces
         "$mod, 1, workspace, 1"
@@ -301,9 +337,32 @@
         "$mod, mouse_up,   workspace, e-1"
       ];
 
+      # Resize windows (repeatable)
+      binde = [
+        "$mod CTRL, left,  resizeactive, -20 0"
+        "$mod CTRL, right, resizeactive, 20 0"
+        "$mod CTRL, up,    resizeactive, 0 -20"
+        "$mod CTRL, down,  resizeactive, 0 20"
+        "$mod CTRL, H, resizeactive, -20 0"
+        "$mod CTRL, J, resizeactive, 0 20"
+        "$mod CTRL, K, resizeactive, 0 -20"
+        "$mod CTRL, L, resizeactive, 20 0"
+      ];
+
       bindm = [
         "$mod, mouse:272, movewindow"
         "$mod, mouse:273, resizewindow"
+      ];
+
+      # Volume & brightness (Framework laptop keys)
+      bindel = [
+        ", XF86AudioRaiseVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+        ", XF86AudioLowerVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+        ", XF86MonBrightnessUp, exec, brightnessctl s 5%+"
+        ", XF86MonBrightnessDown, exec, brightnessctl s 5%-"
+      ];
+      bindl = [
+        ", XF86AudioMute, exec, wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
       ];
     };
   };

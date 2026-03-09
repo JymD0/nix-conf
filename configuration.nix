@@ -28,15 +28,27 @@
   networking.hostName = "yourHostname";
   networking.networkmanager.enable = true;
 
-  # Time zone & locale
+  # Time zone & locale (English language, Austrian region)
   time.timeZone = "Europe/Vienna";
   i18n.defaultLocale = "en_US.UTF-8";
+  i18n.extraLocaleSettings = {
+    LC_ADDRESS = "de_AT.UTF-8";
+    LC_IDENTIFICATION = "de_AT.UTF-8";
+    LC_MEASUREMENT = "de_AT.UTF-8";
+    LC_MONETARY = "de_AT.UTF-8";
+    LC_NAME = "de_AT.UTF-8";
+    LC_NUMERIC = "de_AT.UTF-8";
+    LC_PAPER = "de_AT.UTF-8";
+    LC_TELEPHONE = "de_AT.UTF-8";
+    LC_TIME = "de_AT.UTF-8";
+  };
 
-  # Keyboard layout (system-wide, English US)
+  # Keyboard layout (system-wide, German)
   services.xserver.xkb = {
-    layout = "us";
+    layout = "de";
     variant = "";
   };
+  console.keyMap = "de";
 
   # Audio
   security.rtkit.enable = true;
@@ -90,6 +102,9 @@
     vim
     wl-clipboard
     zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
+
+    # Hyprland extras
+    brightnessctl   # backlight control
   ];
 
   # User account
