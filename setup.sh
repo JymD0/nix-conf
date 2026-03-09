@@ -5,6 +5,8 @@ set -euo pipefail
 # NixOS FW16 AMD Setup Script
 # ============================================================
 
+VERSION="1.1.0"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -23,7 +25,7 @@ STATE_FILE="/tmp/nixos-setup-state"
 RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
 
 # ============================================================
-header "NixOS FW16 Setup"
+header "NixOS FW16 Setup v${VERSION}"
 # ============================================================
 
 # Must be run as root
