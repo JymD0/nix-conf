@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, hyprland-contrib, ... }:
 
 {
   home.username = "yourUsername";
@@ -19,12 +19,11 @@
     # Screenshots
     grim
     slurp
-    grimblast
+    hyprland-contrib.packages.${pkgs.stdenv.hostPlatform.system}.grimblast
 
     # QoL tools
     cliphist
     fuzzel
-    wofi
     waybar          # status bar
 
     # File manager
@@ -63,6 +62,9 @@
     # Wallpaper
     swww       # animated wallpaper daemon for Wayland
     waypaper   # GUI frontend for picking / setting wallpapers
+
+    # Misc
+    xdg-utils
   ];
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@
   programs.ssh = {
     enable = true;
     enableDefaultConfig = false;
-    matchBlocks."*".extraOptions.AddKeysToAgent = "yes";
+    extraConfig = "AddKeysToAgent yes";
     matchBlocks = {
       # Add your SSH hosts here, e.g.:
       # "homelab" = {
@@ -211,7 +213,7 @@
       ];
 
       input = {
-        kb_layout = "us";
+        kb_layout = "de";  # matches system-wide XKB layout
         kb_variant = "";
         follow_mouse = 1;
         sensitivity = 0;
