@@ -124,7 +124,8 @@
   # ─── SSH ──────────────────────────────────────────────────────────────────────
   programs.ssh = {
     enable = true;
-    extraConfig = ''AddKeysToAgent yes'';
+    enableDefaultConfig = false;
+    matchBlocks."*".extraOptions.AddKeysToAgent = "yes";
     matchBlocks = {
       # Add your SSH hosts here, e.g.:
       # "homelab" = {
@@ -142,29 +143,35 @@
   # ─── VS Code ──────────────────────────────────────────────────────────────────
   programs.vscode = {
     enable = true;
-    extensions = with pkgs.vscode-extensions; [
-      jnoortheen.nix-ide
-      dracula-theme.theme-dracula
-      eamodio.gitlens
-    ];
-    userSettings = {
-      "workbench.colorTheme"              = "Dracula";
-      "editor.fontSize"                   = 14;
-      "editor.fontFamily"                 = "'JetBrains Mono', 'monospace'";
-      "editor.formatOnSave"               = true;
-      "editor.minimap.enabled"            = false;
-      "files.autoSave"                    = "afterDelay";
-      "terminal.integrated.fontSize"      = 13;
-      "terminal.integrated.defaultProfile.linux" = "bash";
-      "git.autofetch"                     = true;
+    profiles.default = {
+      extensions = with pkgs.vscode-extensions; [
+        jnoortheen.nix-ide
+        dracula-theme.theme-dracula
+        eamodio.gitlens
+      ];
+      userSettings = {
+        "workbench.colorTheme"              = "Dracula";
+        "editor.fontSize"                   = 14;
+        "editor.fontFamily"                 = "'JetBrains Mono', 'monospace'";
+        "editor.formatOnSave"               = true;
+        "editor.minimap.enabled"            = false;
+        "files.autoSave"                    = "afterDelay";
+        "terminal.integrated.fontSize"      = 13;
+        "terminal.integrated.defaultProfile.linux" = "bash";
+        "git.autofetch"                     = true;
+      };
     };
   };
 
   # ─── Git ──────────────────────────────────────────────────────────────────────
   programs.git = {
     enable = true;
-    userName  = "Your Name";
-    userEmail = "your.email@example.com";
+    settings = {
+      user = {
+        name  = "Your Name";
+        email = "your.email@example.com";
+      };
+    };
   };
 
   # ─── Bash ─────────────────────────────────────────────────────────────────────
@@ -378,13 +385,94 @@
     enable = true;
     settings = {
       global = {
-        width       = 300;
-        height      = 300;
-        offset      = "30x50";
-        origin      = "top-right";
-        transparency = 10;
-        frame_color = "#33ccff";
-        font        = "JetBrains Mono 10";
+        # Layout
+        width          = 320;
+        height         = 200;
+        offset         = "15x50";
+        origin         = "top-right";
+        scale          = 0;
+        gap_size        = 6;
+
+        # Progress bar
+        progress_bar                  = true;
+        progress_bar_height           = 10;
+        progress_bar_frame_width      = 1;
+        progress_bar_min_width        = 150;
+        progress_bar_max_width        = 300;
+        progress_bar_corner_radius    = 4;
+
+        # Appearance
+        transparency   = 10;
+        corner_radius  = 8;
+        frame_width    = 2;
+        frame_color    = "#bd93f9";   # Dracula purple
+        separator_color = "frame";
+        separator_height = 2;
+        padding        = 10;
+        horizontal_padding = 12;
+        text_icon_padding  = 8;
+
+        # Typography
+        font           = "JetBrains Mono 10";
+        line_height    = 0;
+        markup         = "full";
+        format         = "<b>%s</b>\\n%b";
+        alignment      = "left";
+        vertical_alignment = "center";
+        ellipsize      = "middle";
+        ignore_newline = false;
+        stack_duplicates = true;
+        hide_duplicate_count = false;
+        show_indicators = true;
+
+        # Icons
+        icon_theme     = "Adwaita";
+        enable_recursive_icon_lookup = true;
+        icon_position  = "left";
+        min_icon_size  = 32;
+        max_icon_size  = 48;
+
+        # History
+        sticky_history = true;
+        history_length = 20;
+
+        # Misc
+        dmenu          = "${pkgs.fuzzel}/bin/fuzzel --dmenu";
+        browser        = "${pkgs.xdg-utils}/bin/xdg-open";
+        always_run_script = true;
+        title          = "Dunst";
+        class          = "Dunst";
+        ignore_dbusclose = false;
+        force_xwayland  = false;
+        force_xinerama  = false;
+        mouse_left_click   = "close_current";
+        mouse_middle_click = "do_action, close_current";
+        mouse_right_click  = "close_all";
+      };
+
+      # Urgency levels — Dracula palette
+      urgency_low = {
+        background = "#282a36";   # Dracula background
+        foreground = "#f8f8f2";   # Dracula foreground
+        frame_color = "#6272a4";  # Dracula comment / muted
+        timeout    = 4;
+        icon       = "dialog-information";
+      };
+
+      urgency_normal = {
+        background = "#282a36";
+        foreground = "#f8f8f2";
+        frame_color = "#bd93f9";  # Dracula purple
+        timeout    = 8;
+        icon       = "dialog-information";
+      };
+
+      urgency_critical = {
+        background = "#282a36";
+        foreground = "#ff5555";   # Dracula red
+        frame_color = "#ff5555";
+        timeout    = 0;           # stays until dismissed
+        icon       = "dialog-warning";
       };
     };
   };
