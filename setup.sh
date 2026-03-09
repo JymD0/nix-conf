@@ -25,7 +25,8 @@ STATE_FILE="/tmp/nixos-setup-state"
 RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
 
 # ============================================================
-header "NixOS FW16 Setup v${VERSION}"
+header "NixOS FW16 Setup"
+echo -e "  ${BOLD}Version:${NC} ${GREEN}${VERSION}${NC}"
 # ============================================================
 
 # Must be run as root
