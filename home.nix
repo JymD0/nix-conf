@@ -50,6 +50,8 @@
     # Fonts
     noto-fonts-color-emoji
     jetbrains-mono
+    font-awesome          # icons for Waybar
+    nerd-fonts.jetbrains-mono  # Nerd Font variant with extra glyphs
 
     # SSH & File Transfer
     termscp

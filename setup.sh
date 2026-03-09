@@ -253,12 +253,25 @@ fi
 header "Step 10: Install Claude Code"
 # ============================================================
 
-if command -v claude &>/dev/null; then
+if command -v claude &>/dev/null || [[ -x "$HOME_DIR/.npm-global/bin/claude" ]]; then
   warn "Claude Code already installed, skipping."
 else
+  log "Configuring npm global prefix for $USERNAME ..."
+  sudo -u "$USERNAME" mkdir -p "$HOME_DIR/.npm-global"
+  sudo -u "$USERNAME" npm config set prefix "$HOME_DIR/.npm-global"
+
   log "Installing Claude Code via npm ..."
   sudo -u "$USERNAME" npm install -g @anthropic-ai/claude-code
   log "Claude Code installed. Run 'claude login' after reboot to authenticate."
+fi
+
+# Ensure ~/.npm-global/bin is on PATH via .profile
+PROFILE="$HOME_DIR/.profile"
+NPM_PATH_LINE='export PATH="$HOME/.npm-global/bin:$PATH"'
+if ! grep -qF '.npm-global/bin' "$PROFILE" 2>/dev/null; then
+  echo "$NPM_PATH_LINE" >> "$PROFILE"
+  chown "$USERNAME:users" "$PROFILE"
+  log "Added npm global bin to PATH in .profile"
 fi
 
 # ============================================================

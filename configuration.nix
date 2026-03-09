@@ -74,13 +74,24 @@
     xwayland.enable = true;
   };
 
+  # Set keyboard layout for Hyprland (Wayland)
+  environment.sessionVariables.XKB_DEFAULT_LAYOUT = "de";
+
   # Enable greetd with tuigreet for Hyprland login
   services.greetd = {
     enable = true;
     settings = {
       default_session = {
         # tuigreet was moved out of greetd attrset in recent nixpkgs
-        command = "${pkgs.tuigreet}/bin/tuigreet --time --cmd Hyprland";
+        command = builtins.concatStringsSep " " [
+          "${pkgs.tuigreet}/bin/tuigreet"
+          "--time"
+          "--remember"
+          "--asterisks"
+          "--greeting 'Welcome back!'"
+          "--theme 'border=magenta;text=white;prompt=cyan;time=magenta;action=green;button=yellow;container=black;input=white'"
+          "--cmd 'uwsm start hyprland-uwsm'"
+        ];
         user = "greeter";
       };
     };
