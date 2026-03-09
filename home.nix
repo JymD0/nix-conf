@@ -24,7 +24,6 @@
     # QoL tools
     cliphist
     fuzzel
-    waybar          # status bar
 
     # File manager
     nemo
@@ -190,6 +189,184 @@
 
   programs.starship.enable = true;
 
+  # ─── Waybar ───────────────────────────────────────────────────────────────────
+  programs.waybar = {
+    enable = true;
+    settings = [{
+      layer  = "top";
+      position = "top";
+      height = 32;
+      spacing = 4;
+
+      modules-left   = [ "hyprland/workspaces" "hyprland/window" ];
+      modules-center = [ "clock" ];
+      modules-right  = [
+        "pulseaudio"
+        "backlight"
+        "battery"
+        "network"
+        "bluetooth"
+        "tray"
+      ];
+
+      "hyprland/workspaces" = {
+        format = "{icon}";
+        format-icons = {
+          "1" = "1"; "2" = "2"; "3" = "3"; "4" = "4"; "5" = "5";
+          "6" = "6"; "7" = "7"; "8" = "8"; "9" = "9"; "10" = "10";
+          urgent = "";
+          active = "";
+          default = "";
+        };
+        persistent-workspaces = {};
+      };
+
+      "hyprland/window" = {
+        format = "{}";
+        max-length = 50;
+      };
+
+      clock = {
+        format = " {:%H:%M}";
+        format-alt = " {:%A, %d %B %Y}";
+        tooltip-format = "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
+      };
+
+      battery = {
+        states = { warning = 30; critical = 15; };
+        format = "{icon} {capacity}%";
+        format-charging    = " {capacity}%";
+        format-plugged     = " {capacity}%";
+        format-warning     = " {capacity}%";
+        format-critical    = " {capacity}%";
+        format-icons       = [ "" "" "" "" "" ];
+      };
+
+      network = {
+        format-wifi         = " {essid}";
+        format-ethernet     = " {ipaddr}";
+        format-disconnected = "⚠ Disconnected";
+        tooltip-format      = "{ifname}: {ipaddr}\nSignal: {signaldBm} dBm";
+        on-click            = "kitty -e nmtui";
+      };
+
+      pulseaudio = {
+        format        = "{icon} {volume}%";
+        format-muted  = " muted";
+        format-icons  = { default = [ "" "" "" ]; };
+        on-click      = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+        on-click-right = "kitty -e pulsemixer";
+      };
+
+      backlight = {
+        format = "{icon} {percent}%";
+        format-icons = [ "" "" "" "" "" "" "" "" "" ];
+        on-scroll-up   = "brightnessctl s 5%+";
+        on-scroll-down = "brightnessctl s 5%-";
+      };
+
+      bluetooth = {
+        format          = " {status}";
+        format-connected = " {device_alias}";
+        format-off      = "";
+        tooltip-format  = "{controller_alias}\t{controller_address}\n\n{num_connections} connected";
+        on-click        = "blueman-manager";
+      };
+
+      tray = {
+        spacing = 8;
+      };
+    }];
+
+    style = ''
+      * {
+        font-family: "JetBrainsMono Nerd Font", "Font Awesome 6 Free", "Font Awesome 6 Brands", monospace;
+        font-size: 13px;
+        min-height: 0;
+      }
+
+      window#waybar {
+        background-color: rgba(40, 42, 54, 0.92);
+        color: #f8f8f2;
+        border-bottom: 2px solid #bd93f9;
+      }
+
+      .modules-left, .modules-center, .modules-right {
+        padding: 0 8px;
+      }
+
+      #workspaces button {
+        padding: 0 6px;
+        color: #6272a4;
+        background: transparent;
+        border: none;
+        border-radius: 4px;
+      }
+      #workspaces button.active {
+        color: #f8f8f2;
+        background-color: #44475a;
+      }
+      #workspaces button.urgent {
+        color: #ff5555;
+      }
+
+      #clock {
+        color: #8be9fd;
+        font-weight: bold;
+      }
+
+      #battery {
+        color: #50fa7b;
+      }
+      #battery.warning {
+        color: #f1fa8c;
+      }
+      #battery.critical {
+        color: #ff5555;
+        animation: blink 0.5s steps(1) infinite;
+      }
+      @keyframes blink {
+        to { color: #f8f8f2; }
+      }
+
+      #network {
+        color: #8be9fd;
+      }
+      #network.disconnected {
+        color: #ff5555;
+      }
+
+      #pulseaudio {
+        color: #bd93f9;
+      }
+      #pulseaudio.muted {
+        color: #6272a4;
+      }
+
+      #backlight {
+        color: #f1fa8c;
+      }
+
+      #bluetooth {
+        color: #8be9fd;
+      }
+      #bluetooth.off {
+        color: #6272a4;
+      }
+
+      #tray {
+        padding: 0 4px;
+      }
+
+      tooltip {
+        background-color: #282a36;
+        border: 1px solid #44475a;
+        border-radius: 6px;
+        color: #f8f8f2;
+      }
+    '';
+  };
+
   # ─── Hyprland ─────────────────────────────────────────────────────────────────
   wayland.windowManager.hyprland = {
     enable = true;
@@ -239,7 +416,6 @@
           size    = 3;
           passes  = 1;
         };
-        # drop_shadow and shadow_* were replaced by shadow {} block in Hyprland v0.45+
         shadow = {
           enabled = true;
           range   = 4;
@@ -294,8 +470,8 @@
 
         # Fullscreen & layout
         "$mod, F, fullscreen, 0"
-        "$mod SHIFT, F, fullscreen, 1"       # maximize (keep gaps/bar)
-        "$mod, TAB, workspace, previous"     # quick workspace toggle
+        "$mod SHIFT, F, fullscreen, 1"
+        "$mod, TAB, workspace, previous"
         "$mod, S, togglespecialworkspace, magic"
         "$mod SHIFT, S, movetoworkspace, special:magic"
 
@@ -354,7 +530,6 @@
         "$mod, mouse_up,   workspace, e-1"
       ];
 
-      # Resize windows (repeatable)
       binde = [
         "$mod CTRL, left,  resizeactive, -20 0"
         "$mod CTRL, right, resizeactive, 20 0"
@@ -371,7 +546,6 @@
         "$mod, mouse:273, resizewindow"
       ];
 
-      # Volume & brightness (Framework laptop keys)
       bindel = [
         ", XF86AudioRaiseVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
         ", XF86AudioLowerVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
@@ -389,7 +563,6 @@
     enable = true;
     settings = {
       global = {
-        # Layout
         width          = 320;
         height         = 200;
         offset         = "15x50";
@@ -397,7 +570,6 @@
         scale          = 0;
         gap_size        = 6;
 
-        # Progress bar
         progress_bar                  = true;
         progress_bar_height           = 10;
         progress_bar_frame_width      = 1;
@@ -405,18 +577,16 @@
         progress_bar_max_width        = 300;
         progress_bar_corner_radius    = 4;
 
-        # Appearance
         transparency   = 10;
         corner_radius  = 8;
         frame_width    = 2;
-        frame_color    = "#bd93f9";   # Dracula purple
+        frame_color    = "#bd93f9";
         separator_color = "frame";
         separator_height = 2;
         padding        = 10;
         horizontal_padding = 12;
         text_icon_padding  = 8;
 
-        # Typography
         font           = "JetBrains Mono 10";
         line_height    = 0;
         markup         = "full";
@@ -429,18 +599,15 @@
         hide_duplicate_count = false;
         show_indicators = true;
 
-        # Icons
         icon_theme     = "Adwaita";
         enable_recursive_icon_lookup = true;
         icon_position  = "left";
         min_icon_size  = 32;
         max_icon_size  = 48;
 
-        # History
         sticky_history = true;
         history_length = 20;
 
-        # Misc
         dmenu          = "${pkgs.fuzzel}/bin/fuzzel --dmenu";
         browser        = "${pkgs.xdg-utils}/bin/xdg-open";
         always_run_script = true;
@@ -454,11 +621,10 @@
         mouse_right_click  = "close_all";
       };
 
-      # Urgency levels — Dracula palette
       urgency_low = {
-        background = "#282a36";   # Dracula background
-        foreground = "#f8f8f2";   # Dracula foreground
-        frame_color = "#6272a4";  # Dracula comment / muted
+        background = "#282a36";
+        foreground = "#f8f8f2";
+        frame_color = "#6272a4";
         timeout    = 4;
         icon       = "dialog-information";
       };
@@ -466,16 +632,16 @@
       urgency_normal = {
         background = "#282a36";
         foreground = "#f8f8f2";
-        frame_color = "#bd93f9";  # Dracula purple
+        frame_color = "#bd93f9";
         timeout    = 8;
         icon       = "dialog-information";
       };
 
       urgency_critical = {
         background = "#282a36";
-        foreground = "#ff5555";   # Dracula red
+        foreground = "#ff5555";
         frame_color = "#ff5555";
-        timeout    = 0;           # stays until dismissed
+        timeout    = 0;
         icon       = "dialog-warning";
       };
     };
