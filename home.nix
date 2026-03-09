@@ -23,7 +23,6 @@
 
     # QoL tools
     cliphist
-    fuzzel
 
     # File manager
     nemo
@@ -122,6 +121,42 @@
     };
     shellIntegration.enableBashIntegration = true;
     shellIntegration.enableZshIntegration = true;
+  };
+
+  # ─── Fuzzel ────────────────────────────────────────────────────────────────────
+  programs.fuzzel = {
+    enable = true;
+    settings = {
+      main = {
+        font = "JetBrainsMono Nerd Font:size=13";
+        dpi-aware = "auto";
+        icon-theme = "Adwaita";
+        icons-enabled = true;
+        terminal = "kitty";
+        layer = "overlay";
+        exit-on-keyboard-focus-loss = true;
+        width = 35;          # columns
+        lines = 10;
+        horizontal-pad = 16;
+        vertical-pad = 12;
+        inner-pad = 6;
+        border-radius = 10; # rounded corners matching Hyprland rounding
+      };
+      colors = {
+        # Dracula palette — format is RRGGBBaa
+        background = "282a36ee"; # semi-transparent dark
+        text       = "f8f8f2ff";
+        match      = "bd93f9ff"; # purple highlight for matched chars
+        selection  = "44475aff"; # selected row background
+        selection-text = "f8f8f2ff";
+        selection-match = "ff79c6ff"; # pink for matched chars in selection
+        border     = "bd93f9ff"; # purple border
+      };
+      border = {
+        width = 2;
+        radius = 10;
+      };
+    };
   };
 
   # ─── SSH ──────────────────────────────────────────────────────────────────────
