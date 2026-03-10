@@ -5,7 +5,7 @@ set -euo pipefail
 # NixOS FW16 AMD Setup Script
 # ============================================================
 
-VERSION="1.3.1"
+VERSION="1.3.2"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
