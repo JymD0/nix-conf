@@ -8,7 +8,7 @@
 
   # Bootloader
   boot.loader.systemd-boot.enable = true;
-  boot.loader.systemd-boot.configurationLimit = 1;
+  boot.loader.systemd-boot.configurationLimit = 5;
   boot.loader.efi.canTouchEfiVariables = true;
 
   # Latest kernel for best FW16 support
@@ -67,6 +67,13 @@
   # Fingerprint reader already enabled via nixos-hardware framework module
   # (services.fprintd.enable = lib.mkDefault true in framework/16-inch/common)
 
+  # Power management (critical for laptop battery life)
+  services.power-profiles-daemon.enable = true;
+  services.thermald.enable = true;
+
+  # Firmware updates (Framework ships updates via fwupd)
+  services.fwupd.enable = true;
+
   # Hyprland
   programs.hyprland = {
     enable = true;
@@ -110,6 +117,13 @@
       command = "${pkgs.hyprland}/bin/Hyprland";
       user = "greeter";
     };
+  };
+
+  # Firewall
+  networking.firewall = {
+    enable = true;
+    trustedInterfaces = [ "tailscale0" ];
+    allowedUDPPorts = [ config.services.tailscale.port ];
   };
 
   # Tailscale

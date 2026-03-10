@@ -53,62 +53,69 @@ done
 header "Step 1: Collect configuration values"
 # ============================================================
 
+# Use SETUP_ prefix to avoid shadowing shell builtins (HOSTNAME, USERNAME)
 if [[ -f "$STATE_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$STATE_FILE"
   warn "Loaded saved values from $STATE_FILE:"
-  echo "  Hostname : $HOSTNAME"
-  echo "  Username : $USERNAME"
-  echo "  Full name: $FULLNAME"
-  echo "  Email    : $EMAIL"
+  echo "  Hostname : $SETUP_HOSTNAME"
+  echo "  Username : $SETUP_USERNAME"
+  echo "  Full name: $SETUP_FULLNAME"
+  echo "  Email    : $SETUP_EMAIL"
   echo ""
   read -rp "Use these saved values? [Y/n] " USE_SAVED
   if [[ "$USE_SAVED" =~ ^[Nn]$ ]]; then
     log "Re-entering values ..."
     rm -f "$STATE_FILE"
-    unset HOSTNAME USERNAME FULLNAME EMAIL
+    unset SETUP_HOSTNAME SETUP_USERNAME SETUP_FULLNAME SETUP_EMAIL
   else
     log "Using saved values."
   fi
 fi
 
 # Only prompt for values that aren't already set
-if [[ -z "${HOSTNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Hostname${NC} (e.g. fw16): ")" HOSTNAME
-  [[ -z "$HOSTNAME" ]] && err "Hostname cannot be empty"
+if [[ -z "${SETUP_HOSTNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Hostname${NC} (e.g. fw16): ")" SETUP_HOSTNAME
+  [[ -z "$SETUP_HOSTNAME" ]] && err "Hostname cannot be empty"
+  [[ "$SETUP_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$ ]] \
+    || err "Invalid hostname: only letters, digits, and hyphens allowed"
 fi
 
-if [[ -z "${USERNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Username${NC} (your login user): ")" USERNAME
-  [[ -z "$USERNAME" ]] && err "Username cannot be empty"
+if [[ -z "${SETUP_USERNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Username${NC} (your login user): ")" SETUP_USERNAME
+  [[ -z "$SETUP_USERNAME" ]] && err "Username cannot be empty"
+  [[ "$SETUP_USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] \
+    || err "Invalid username: must start with a-z or _, then a-z 0-9 _ -"
 fi
 
-if [[ -z "${FULLNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Full name${NC} (for git, e.g. Jane Doe): ")" FULLNAME
-  [[ -z "$FULLNAME" ]] && err "Full name cannot be empty"
+if [[ -z "${SETUP_FULLNAME:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Full name${NC} (for git, e.g. Jane Doe): ")" SETUP_FULLNAME
+  [[ -z "$SETUP_FULLNAME" ]] && err "Full name cannot be empty"
 fi
 
-if [[ -z "${EMAIL:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Email${NC} (for git & SSH key): ")" EMAIL
-  [[ -z "$EMAIL" ]] && err "Email cannot be empty"
+if [[ -z "${SETUP_EMAIL:-}" ]]; then
+  read -rp "$(echo -e "${BOLD}Email${NC} (for git & SSH key): ")" SETUP_EMAIL
+  [[ -z "$SETUP_EMAIL" ]] && err "Email cannot be empty"
+  [[ "$SETUP_EMAIL" =~ ^[^@]+@[^@]+\.[^@]+$ ]] \
+    || err "Invalid email format"
 fi
 
 # Persist to state file immediately after collection
 cat > "$STATE_FILE" <<EOF
-HOSTNAME="$HOSTNAME"
-USERNAME="$USERNAME"
-FULLNAME="$FULLNAME"
-EMAIL="$EMAIL"
+SETUP_HOSTNAME="$SETUP_HOSTNAME"
+SETUP_USERNAME="$SETUP_USERNAME"
+SETUP_FULLNAME="$SETUP_FULLNAME"
+SETUP_EMAIL="$SETUP_EMAIL"
 EOF
 chmod 600 "$STATE_FILE"
 log "Values saved to $STATE_FILE"
 
 echo ""
 log "Will configure:"
-echo "  Hostname : $HOSTNAME"
-echo "  Username : $USERNAME"
-echo "  Full name: $FULLNAME"
-echo "  Email    : $EMAIL"
+echo "  Hostname : $SETUP_HOSTNAME"
+echo "  Username : $SETUP_USERNAME"
+echo "  Full name: $SETUP_FULLNAME"
+echo "  Email    : $SETUP_EMAIL"
 echo ""
 read -rp "Continue? [y/N] " CONFIRM
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || err "Aborted."
@@ -133,19 +140,19 @@ header "Step 3: Replace placeholders"
 log "Substituting placeholders in config files ..."
 
 sed -i \
-  -e "s/yourHostname/$HOSTNAME/g" \
-  -e "s/yourUsername/$USERNAME/g" \
+  -e "s/yourHostname/$SETUP_HOSTNAME/g" \
+  -e "s/yourUsername/$SETUP_USERNAME/g" \
   /etc/nixos/flake.nix
 
 sed -i \
-  -e "s/yourHostname/$HOSTNAME/g" \
-  -e "s/yourUsername/$USERNAME/g" \
+  -e "s/yourHostname/$SETUP_HOSTNAME/g" \
+  -e "s/yourUsername/$SETUP_USERNAME/g" \
   /etc/nixos/configuration.nix
 
 sed -i \
-  -e "s/yourUsername/$USERNAME/g" \
-  -e "s/Your Name/$FULLNAME/g" \
-  -e "s/your\.email@example\.com/$EMAIL/g" \
+  -e "s/yourUsername/$SETUP_USERNAME/g" \
+  -e "s/Your Name/$SETUP_FULLNAME/g" \
+  -e "s/your\.email@example\.com/$SETUP_EMAIL/g" \
   /etc/nixos/home.nix
 
 log "Placeholders replaced."
@@ -180,28 +187,26 @@ header "Step 6: Build and switch"
 # The rebuild below will create the user automatically - no useradd needed.
 # NIX_CONFIG enables flakes for this single invocation.
 
-# Clean old boot entries to prevent "No space left on device" on small EFI partitions
-log "Cleaning old boot entries to free space on /boot ..."
-find /boot/EFI/nixos/ -type f -delete 2>/dev/null || true
-find /boot/loader/entries/ -type f -delete 2>/dev/null || true
-nix-env --delete-generations +1 --profile /nix/var/nix/profiles/system 2>/dev/null || true
-log "Boot partition cleaned."
+# Clean old generations to free space on /boot (keep last 3 for rollback safety)
+log "Cleaning old generations to free space on /boot ..."
+nix-env --delete-generations +3 --profile /nix/var/nix/profiles/system 2>/dev/null || true
+log "Old generations cleaned."
 
 log "Running nixos-rebuild switch (this will take a while) ..."
 NIX_CONFIG="experimental-features = nix-command flakes" \
-  nixos-rebuild switch --flake "/etc/nixos#$HOSTNAME"
+  nixos-rebuild switch --flake "/etc/nixos#$SETUP_HOSTNAME"
 
 # ============================================================
 header "Step 7: Set user password"
 # ============================================================
 
-HOME_DIR="/home/$USERNAME"
+HOME_DIR="/home/$SETUP_USERNAME"
 
-if passwd -S "$USERNAME" 2>/dev/null | grep -q ' P '; then
-  warn "Password already set for '$USERNAME', skipping."
+if passwd -S "$SETUP_USERNAME" 2>/dev/null | grep -q ' P '; then
+  warn "Password already set for '$SETUP_USERNAME', skipping."
 else
-  warn "Set a password for '$USERNAME':"
-  passwd "$USERNAME"
+  warn "Set a password for '$SETUP_USERNAME':"
+  passwd "$SETUP_USERNAME"
 fi
 
 # ============================================================
@@ -210,7 +215,7 @@ header "Step 8: Create remaining home directories"
 
 # NOTE: .config is intentionally excluded - Home Manager owns it.
 # xdg.userDirs.createDirectories in home.nix handles Desktop/Downloads/etc.
-log "Creating extra home directories for $USERNAME ..."
+log "Creating extra home directories for $SETUP_USERNAME ..."
 
 EXTRA_DIRS=(
   ".local/bin"
@@ -227,7 +232,7 @@ for dir in "${EXTRA_DIRS[@]}"; do
   fi
 done
 
-chown -R "$USERNAME:users" "$HOME_DIR"
+chown -R "$SETUP_USERNAME:users" "$HOME_DIR"
 chmod 700 "$HOME_DIR/.ssh"
 log "Ownership and permissions set."
 
@@ -240,38 +245,13 @@ SSH_KEY="$HOME_DIR/.ssh/id_ed25519"
 if [[ -f "$SSH_KEY" ]]; then
   warn "SSH key already exists at $SSH_KEY, skipping."
 else
-  log "Generating ed25519 SSH key for $USERNAME ..."
-  sudo -u "$USERNAME" ssh-keygen -t ed25519 -C "$EMAIL" -f "$SSH_KEY" -N ""
+  log "Generating ed25519 SSH key for $SETUP_USERNAME ..."
+  sudo -u "$SETUP_USERNAME" ssh-keygen -t ed25519 -C "$SETUP_EMAIL" -f "$SSH_KEY" -N ""
   log "SSH key generated."
   echo ""
   echo -e "${BOLD}Your public key (add to servers / GitHub):${NC}"
   cat "${SSH_KEY}.pub"
   echo ""
-fi
-
-# ============================================================
-header "Step 10: Install Claude Code"
-# ============================================================
-
-if command -v claude &>/dev/null || [[ -x "$HOME_DIR/.npm-global/bin/claude" ]]; then
-  warn "Claude Code already installed, skipping."
-else
-  log "Configuring npm global prefix for $USERNAME ..."
-  sudo -u "$USERNAME" mkdir -p "$HOME_DIR/.npm-global"
-  sudo -u "$USERNAME" npm config set prefix "$HOME_DIR/.npm-global"
-
-  log "Installing Claude Code via npm ..."
-  sudo -u "$USERNAME" npm install -g @anthropic-ai/claude-code
-  log "Claude Code installed. Run 'claude login' after reboot to authenticate."
-fi
-
-# Ensure ~/.npm-global/bin is on PATH via .profile
-PROFILE="$HOME_DIR/.profile"
-NPM_PATH_LINE='export PATH="$HOME/.npm-global/bin:$PATH"'
-if ! grep -qF '.npm-global/bin' "$PROFILE" 2>/dev/null; then
-  echo "$NPM_PATH_LINE" >> "$PROFILE"
-  chown "$USERNAME:users" "$PROFILE"
-  log "Added npm global bin to PATH in .profile"
 fi
 
 # ============================================================
@@ -286,7 +266,7 @@ echo ""
 echo -e "${GREEN}${BOLD}Setup complete.${NC} Here's what to do next:"
 echo ""
 echo -e "  1. ${BOLD}Reboot${NC}              \u2192 sudo reboot"
-echo -e "  2. ${BOLD}Log in${NC}              \u2192 via tuigreet, select Hyprland"
+echo -e "  2. ${BOLD}Log in${NC}              \u2192 via regreet, select Hyprland"
 echo -e "  3. ${BOLD}Authenticate Claude${NC} \u2192 claude login"
 echo -e "  4. ${BOLD}Copy SSH key${NC}        \u2192 ssh-copy-id <your-server>"
 echo -e "  5. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/home.nix (programs.ssh.matchBlocks)"

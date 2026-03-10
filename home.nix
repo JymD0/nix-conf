@@ -1,4 +1,4 @@
-{ config, pkgs, lib, hyprland-contrib, ... }:
+{ config, pkgs, lib, hyprland-contrib, claude-code, ... }:
 
 {
   home.username = "yourUsername";
@@ -23,12 +23,17 @@
 
     # QoL tools
     cliphist
+    wl-clipboard
 
     # File manager
     nemo
 
     # Notifications
     libnotify
+
+    # Bluetooth & network (needed by Waybar on-click actions)
+    blueman
+    networkmanagerapplet
 
     # Display management
     wdisplays       # GUI for managing monitors (position, resolution, scale)
@@ -40,6 +45,12 @@
     # System info
     fastfetch
     btop
+
+    # Audio mixer (needed by Waybar pulseaudio on-click-right)
+    pulsemixer
+
+    # Media control
+    playerctl
 
     # Apps
     discord
@@ -54,12 +65,19 @@
     termscp
     sshpass
 
-    # Claude Code (npm install -g @anthropic-ai/claude-code)
-    nodejs_22
+    # Claude Code (hourly-updated flake, avoids nixpkgs timeout issues)
+    claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
 
     # Wallpaper
     swww       # animated wallpaper daemon for Wayland
     waypaper   # GUI frontend for picking / setting wallpapers
+
+    # Utilities
+    ripgrep
+    fd
+    jq
+    unzip
+    p7zip
 
     # Misc
     xdg-utils
@@ -222,7 +240,28 @@
     };
   };
 
-  programs.starship.enable = true;
+  programs.starship = {
+    enable = true;
+    settings = {
+      format = "$all";
+      palette = "dracula";
+      palettes.dracula = {
+        purple = "#bd93f9";
+        cyan   = "#8be9fd";
+        green  = "#50fa7b";
+        red    = "#ff5555";
+        yellow = "#f1fa8c";
+        pink   = "#ff79c6";
+        orange = "#ffb86c";
+      };
+      character = {
+        success_symbol = "[>](bold green)";
+        error_symbol   = "[>](bold red)";
+      };
+      directory.style = "bold cyan";
+      git_branch.style = "bold purple";
+    };
+  };
 
   # ─── Waybar ───────────────────────────────────────────────────────────────────
   programs.waybar = {
@@ -486,7 +525,7 @@
         "$mod, V, togglefloating,"
         "$mod, R, exec, fuzzel"
         "$mod, P, pseudo,"
-        "$mod, J, togglesplit,"
+        "$mod, O, togglesplit,"
 
         # Apps
         "$mod, B,       exec, zen-browser"
@@ -511,7 +550,7 @@
         "$mod SHIFT, S, movetoworkspace, special:magic"
 
         # Lock screen
-        "$mod, L, exec, hyprlock"
+        "$mod ALT, L, exec, hyprlock"
 
         # Center floating window
         "$mod SHIFT, V, centerwindow,"
@@ -524,7 +563,9 @@
 
         # Focus (vim keys)
         "$mod, H, movefocus, l"
+        "$mod, J, movefocus, d"
         "$mod, K, movefocus, u"
+        "$mod, L, movefocus, r"
 
         # Move windows
         "$mod SHIFT, left,  movewindow, l"
@@ -589,6 +630,9 @@
       ];
       bindl = [
         ", XF86AudioMute, exec, wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+        ", XF86AudioPlay, exec, playerctl play-pause"
+        ", XF86AudioNext, exec, playerctl next"
+        ", XF86AudioPrev, exec, playerctl previous"
       ];
     };
   };
@@ -679,6 +723,77 @@
         timeout    = 0;
         icon       = "dialog-warning";
       };
+    };
+  };
+
+  # ─── Cursor Theme ────────────────────────────────────────────────────────────
+  home.pointerCursor = {
+    name = "Bibata-Modern-Classic";
+    package = pkgs.bibata-cursors;
+    size = 24;
+    gtk.enable = true;
+  };
+
+  # ─── Hyprlock ───────────────────────────────────────────────────────────────
+  programs.hyprlock = {
+    enable = true;
+    settings = {
+      general = {
+        hide_cursor = true;
+        grace = 5;
+      };
+      background = [{
+        color = "rgb(40, 42, 54)";
+        blur_passes = 2;
+        blur_size = 5;
+      }];
+      input-field = [{
+        size = "250, 50";
+        outline_thickness = 2;
+        dots_size = 0.25;
+        dots_spacing = 0.3;
+        outer_color = "rgb(189, 147, 249)";
+        inner_color = "rgb(68, 71, 90)";
+        font_color = "rgb(248, 248, 242)";
+        fade_on_empty = true;
+        placeholder_text = "<i>Password...</i>";
+        fail_color = "rgb(255, 85, 85)";
+        fail_text = "<i>$FAIL <b>($ATTEMPTS)</b></i>";
+        position = "0, -20";
+        halign = "center";
+        valign = "center";
+      }];
+    };
+  };
+
+  # ─── Hypridle ───────────────────────────────────────────────────────────────
+  services.hypridle = {
+    enable = true;
+    settings = {
+      general = {
+        lock_cmd = "pidof hyprlock || hyprlock";
+        before_sleep_cmd = "loginctl lock-session";
+        after_sleep_cmd = "hyprctl dispatch dpms on";
+      };
+      listener = [
+        # Dim screen after 5 minutes
+        {
+          timeout = 300;
+          on-timeout = "brightnessctl -s set 30%";
+          on-resume = "brightnessctl -r";
+        }
+        # Lock screen after 10 minutes
+        {
+          timeout = 600;
+          on-timeout = "loginctl lock-session";
+        }
+        # Turn off display after 15 minutes
+        {
+          timeout = 900;
+          on-timeout = "hyprctl dispatch dpms off";
+          on-resume = "hyprctl dispatch dpms on";
+        }
+      ];
     };
   };
 
