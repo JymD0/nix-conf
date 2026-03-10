@@ -5,7 +5,7 @@ set -euo pipefail
 # NixOS FW16 AMD Setup Script
 # ============================================================
 
-VERSION="1.3.3"
+VERSION="1.3.4"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -23,6 +23,29 @@ header()  { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 STATE_FILE="/tmp/nixos-setup-state"
 
 RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
+
+# ── Detect values already applied to /etc/nixos (non-placeholder only) ────────
+detect_current_values() {
+  local conf="/etc/nixos/configuration.nix"
+  local home="/etc/nixos/home.nix"
+  DETECTED_HOSTNAME="" DETECTED_USERNAME="" DETECTED_FULLNAME="" DETECTED_EMAIL=""
+
+  if [[ -f "$conf" ]]; then
+    local h u f
+    h=$(grep -oP 'networking\.hostName\s*=\s*"\K[^"]+' "$conf" 2>/dev/null || true)
+    u=$(grep -oP 'users\.users\.\K[a-z_][a-z0-9_-]+' "$conf" 2>/dev/null | head -1 || true)
+    f=$(grep -oP 'description\s*=\s*"\K[^"]+' "$conf" 2>/dev/null | head -1 || true)
+    [[ "$h" != "yourHostname" ]] && DETECTED_HOSTNAME="$h"
+    [[ "$u" != "yourUsername" ]] && DETECTED_USERNAME="$u"
+    [[ "$f" != "Your Name"   ]] && DETECTED_FULLNAME="$f"
+  fi
+
+  if [[ -f "$home" ]]; then
+    local e
+    e=$(grep -oP 'email\s*=\s*"\K[^"]+' "$home" 2>/dev/null | head -1 || true)
+    [[ "$e" != 'your.email@example.com' ]] && DETECTED_EMAIL="$e"
+  fi
+}
 
 # ============================================================
 header "NixOS FW16 Setup"
@@ -54,6 +77,8 @@ header "Step 1: Collect configuration values"
 # ============================================================
 
 # Use SETUP_ prefix to avoid shadowing shell builtins (HOSTNAME, USERNAME)
+
+# ── 1a. State-file shortcut (survives mid-run crashes) ────────────────────────
 if [[ -f "$STATE_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$STATE_FILE"
@@ -73,28 +98,62 @@ if [[ -f "$STATE_FILE" ]]; then
   fi
 fi
 
-# Only prompt for values that aren't already set
+# ── 1b. Current-values shortcut (already-configured install) ─────────────────
 if [[ -z "${SETUP_HOSTNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Hostname${NC} (e.g. fw16): ")" SETUP_HOSTNAME
+  detect_current_values
+  if [[ -n "$DETECTED_HOSTNAME" && -n "$DETECTED_USERNAME" \
+     && -n "$DETECTED_FULLNAME" && -n "$DETECTED_EMAIL" ]]; then
+    echo ""
+    log "Current values detected from /etc/nixos:"
+    echo "  Hostname : $DETECTED_HOSTNAME"
+    echo "  Username : $DETECTED_USERNAME"
+    echo "  Full name: $DETECTED_FULLNAME"
+    echo "  Email    : $DETECTED_EMAIL"
+    echo ""
+    read -rp "Use current values? [Y/n] " USE_CURRENT
+    if [[ ! "$USE_CURRENT" =~ ^[Nn]$ ]]; then
+      SETUP_HOSTNAME="$DETECTED_HOSTNAME"
+      SETUP_USERNAME="$DETECTED_USERNAME"
+      SETUP_FULLNAME="$DETECTED_FULLNAME"
+      SETUP_EMAIL="$DETECTED_EMAIL"
+      log "Using current values."
+    fi
+  fi
+fi
+
+# ── 1c. Individual prompts for any value still missing ────────────────────────
+# Default hints show the detected value (if any) so the user can just press Enter.
+
+prompt_with_default() {
+  local label="$1" default="$2" var="$3"
+  local hint=""
+  [[ -n "$default" ]] && hint=" ${BLUE}[${default}]${NC}"
+  read -rp "$(echo -e "${BOLD}${label}${NC}${hint}: ")" _val
+  [[ -z "$_val" && -n "$default" ]] && _val="$default"
+  printf -v "$var" '%s' "$_val"
+}
+
+if [[ -z "${SETUP_HOSTNAME:-}" ]]; then
+  prompt_with_default "Hostname (e.g. fw16)" "${DETECTED_HOSTNAME:-}" SETUP_HOSTNAME
   [[ -z "$SETUP_HOSTNAME" ]] && err "Hostname cannot be empty"
   [[ "$SETUP_HOSTNAME" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$ ]] \
     || err "Invalid hostname: only letters, digits, and hyphens allowed"
 fi
 
 if [[ -z "${SETUP_USERNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Username${NC} (your login user): ")" SETUP_USERNAME
+  prompt_with_default "Username (your login user)" "${DETECTED_USERNAME:-}" SETUP_USERNAME
   [[ -z "$SETUP_USERNAME" ]] && err "Username cannot be empty"
   [[ "$SETUP_USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]] \
     || err "Invalid username: must start with a-z or _, then a-z 0-9 _ -"
 fi
 
 if [[ -z "${SETUP_FULLNAME:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Full name${NC} (for git, e.g. Jane Doe): ")" SETUP_FULLNAME
+  prompt_with_default "Full name (for git, e.g. Jane Doe)" "${DETECTED_FULLNAME:-}" SETUP_FULLNAME
   [[ -z "$SETUP_FULLNAME" ]] && err "Full name cannot be empty"
 fi
 
 if [[ -z "${SETUP_EMAIL:-}" ]]; then
-  read -rp "$(echo -e "${BOLD}Email${NC} (for git & SSH key): ")" SETUP_EMAIL
+  prompt_with_default "Email (for git & SSH key)" "${DETECTED_EMAIL:-}" SETUP_EMAIL
   [[ -z "$SETUP_EMAIL" ]] && err "Email cannot be empty"
   [[ "$SETUP_EMAIL" =~ ^[^@]+@[^@]+\.[^@]+$ ]] \
     || err "Invalid email format"

@@ -1,5 +1,61 @@
 { config, pkgs, lib, hyprland-contrib, claude-code, ... }:
 
+let
+  # Smart brightness control: brightnessctl for internal (eDP-1), ddcutil for external monitors
+  brightnessScript = pkgs.writeShellScript "brightness-ctl" ''
+    ACTION=$1
+    STEP=5
+
+    ACTIVE_MON=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
+      | ${pkgs.jq}/bin/jq -r '.monitor // "eDP-1"')
+
+    if [ "$ACTIVE_MON" = "eDP-1" ] || [ -z "$ACTIVE_MON" ]; then
+      case "$ACTION" in
+        up)   ${pkgs.brightnessctl}/bin/brightnessctl s "$STEP%+" -q ;;
+        down) ${pkgs.brightnessctl}/bin/brightnessctl s "$STEP%-" -q ;;
+      esac
+      CUR=$(${pkgs.brightnessctl}/bin/brightnessctl g)
+      MAX=$(${pkgs.brightnessctl}/bin/brightnessctl m)
+      PCT=$(( CUR * 100 / MAX ))
+      LABEL="Internal"
+    else
+      CUR=$(${pkgs.ddcutil}/bin/ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
+      CUR=''${CUR:-50}
+      case "$ACTION" in
+        up)   NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP )) ;;
+        down) NEW=$(( CUR - STEP < 0 ? 0 : CUR - STEP )) ;;
+      esac
+      ${pkgs.ddcutil}/bin/ddcutil setvcp 10 "$NEW" 2>/dev/null
+      PCT=$NEW
+      LABEL="External"
+    fi
+
+    ${pkgs.libnotify}/bin/notify-send \
+      -h string:x-canonical-private-synchronous:brightness \
+      -h "int:value:$PCT" \
+      -t 2000 \
+      "󰃠 Brightness ($LABEL)" "$PCT%"
+  '';
+
+  brightnessStatusScript = pkgs.writeShellScript "brightness-status" ''
+    PCT=$(${pkgs.ddcutil}/bin/ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
+    PCT=''${PCT:-"?"}
+    echo "{\"text\": \"$PCT%\", \"tooltip\": \"External brightness: $PCT%\"}"
+  '';
+
+  powerMenu = pkgs.writeShellScript "power-menu" ''
+    choice=$(printf '󰌾  Lock\n󰒲  Suspend\n󰍃  Log out\n󰋊  Hibernate\n󰑓  Reboot\n󰐥  Shut down' | \
+      fuzzel --dmenu --prompt '⏻  ' --width 24 --lines 6 --no-icons)
+    case "$choice" in
+      *Lock*)        hyprlock ;;
+      *Suspend*)     systemctl suspend ;;
+      *"Log out"*)   hyprctl dispatch exit 0 ;;
+      *Hibernate*)   systemctl hibernate ;;
+      *Reboot*)      systemctl reboot ;;
+      *"Shut down"*) systemctl poweroff ;;
+    esac
+  '';
+in
 {
   home.username = "yourUsername";
   home.homeDirectory = "/home/yourUsername";
@@ -59,6 +115,9 @@
     font-awesome
     nerd-fonts.jetbrains-mono
 
+    # Icons
+    papirus-icon-theme
+
     # SSH & File Transfer
     termscp
     sshpass
@@ -66,6 +125,11 @@
     # Wallpaper
     swww
     waypaper
+    variety
+
+    # Calendar
+    khal
+    vdirsyncer
 
     # Utilities
     ripgrep
@@ -95,6 +159,133 @@
       publicShare = "${config.home.homeDirectory}/Public";
       templates  = "${config.home.homeDirectory}/Templates";
       videos     = "${config.home.homeDirectory}/Videos";
+    };
+
+    desktopEntries = {
+      blueman-adapters = {
+        name = "Bluetooth Adapters";
+        comment = "Set Bluetooth Adapter Properties";
+        exec = "blueman-adapters";
+        icon = "blueman";
+        terminal = false;
+        categories = [ "Settings" "HardwareSettings" ];
+      };
+      khal = {
+        name = "Calendar";
+        comment = "Terminal calendar application";
+        exec = "kitty --hold --class floating-calendar --title Calendar -e khal interactive";
+        icon = "calendar";
+        terminal = false;
+        categories = [ "Calendar" ];
+      };
+    };
+
+    configFile = {
+      # ─── Variety wallpaper config ───────────────────────────────────────────────
+      "variety/variety.conf".text = ''
+        # Wallpaper change settings
+        change_enabled = True
+        change_on_start = True
+        change_interval = 1800
+
+        # Download settings
+        download_enabled = True
+        download_interval = 60
+        download_folder = ~/.config/variety/Downloaded
+        quota_enabled = True
+        quota_size = 500
+
+        # Folders
+        favorites_folder = ~/.config/variety/Favorites
+        fetched_folder = ~/.config/variety/Fetched
+
+        # Image filtering
+        safe_mode = True
+        min_size_enabled = True
+        min_size = 80
+        use_landscape_enabled = True
+        lightness_enabled = False
+
+        [sources]
+        src1 = True|favorites|The Favorites folder
+        src2 = True|fetched|The Fetched folder
+        src3 = True|unsplash|High-resolution photos from Unsplash.com
+        src4 = True|bing|Bing Photo of the Day
+        src5 = True|wallhaven|nature dark
+        src6 = True|wallhaven|landscape
+        src7 = False|apod|NASA's Astronomy Picture of the Day
+        src8 = False|desktoppr|Random wallpapers from Desktoppr.co
+        src9 = False|earth|World Sunlight Map - live wallpaper from Die.net
+
+        [filters]
+      '';
+
+      # Custom set_wallpaper script using swww
+      "variety/scripts/set_wallpaper".source =
+        let
+          script = pkgs.writeShellScript "variety-set-wallpaper" ''
+            if [ -z "$1" ]; then
+              exit 1
+            fi
+            ${pkgs.swww}/bin/swww img "$1" \
+              --transition-type fade \
+              --transition-duration 1 \
+              --transition-fps 60
+          '';
+        in script;
+
+      # Variety also needs a get_wallpaper script
+      "variety/scripts/get_wallpaper".source =
+        let
+          script = pkgs.writeShellScript "variety-get-wallpaper" ''
+            ${pkgs.swww}/bin/swww query | grep -oP 'image: \K.*' | head -1
+          '';
+        in script;
+
+      # ─── khal calendar config ─────────────────────────────────────────────────
+      "khal/config".text = ''
+        [calendars]
+
+        [[personal]]
+        path = ~/.local/share/vdirsyncer/calendar/*
+        type = discover
+        color = light magenta
+
+        [locale]
+        timeformat = %H:%M
+        dateformat = %d.%m.%Y
+        longdateformat = %d.%m.%Y
+        datetimeformat = %d.%m.%Y %H:%M
+        longdatetimeformat = %d.%m.%Y %H:%M
+        default_timezone = Europe/Vienna
+        firstweekday = 0
+
+        [default]
+        default_calendar = personal
+      '';
+
+      # ─── vdirsyncer config ────────────────────────────────────────────────────
+      "vdirsyncer/config".text = ''
+        [general]
+        status_path = "~/.local/share/vdirsyncer/status/"
+
+        [pair personal_calendar]
+        a = "personal_calendar_local"
+        b = "personal_calendar_remote"
+        collections = ["from a", "from b"]
+        metadata = ["color"]
+
+        [storage personal_calendar_local]
+        type = "filesystem"
+        path = "~/.local/share/vdirsyncer/calendar/"
+        fileext = ".ics"
+
+        [storage personal_calendar_remote]
+        type = "google_calendar"
+        token_file = "~/.local/share/vdirsyncer/google_token"
+        client_id = ""
+        client_secret = ""
+      '';
     };
   };
 
@@ -145,7 +336,7 @@
       main = {
         font = "JetBrainsMono Nerd Font:size=13";
         dpi-aware = "auto";
-        icon-theme = "Adwaita";
+        icon-theme = "Papirus-Dark";
         icons-enabled = true;
         terminal = "kitty";
         layer = "overlay";
@@ -241,179 +432,427 @@
   };
 
   # ─── Waybar ───────────────────────────────────────────────────────────────────
-  programs.waybar = {
-    enable = true;
-    settings = [{
-      layer  = "top";
-      position = "top";
-      height = 32;
-      spacing = 4;
-
-      modules-left   = [ "hyprland/workspaces" "hyprland/window" ];
-      modules-center = [ "clock" ];
-      modules-right  = [
-        "pulseaudio"
-        "backlight"
-        "battery"
-        "network"
-        "bluetooth"
-        "tray"
-      ];
-
-      "hyprland/workspaces" = {
-        format = "{icon}";
-        format-icons = {
-          "1" = "1"; "2" = "2"; "3" = "3"; "4" = "4"; "5" = "5";
-          "6" = "6"; "7" = "7"; "8" = "8"; "9" = "9"; "10" = "10";
-          urgent = "";
-          active = "";
-          default = "";
+  programs.waybar =
+    let
+      # ── Shared module definitions (identical on all outputs) ──────────────
+      sharedModules = {
+        "hyprland/workspaces" = {
+          format = "{id}";
+          on-click = "activate";
+          sort-by-number = true;
         };
-        persistent-workspaces = {};
+
+        # Collapse when empty so it doesn't leave a blank gap in the left pill.
+        "hyprland/window" = {
+          format = "{}";
+          max-length = 50;
+          separate-outputs = true;
+        };
+
+        clock = {
+          format     = " {:%H:%M}";
+          format-alt = " {:%a, %d %b %Y}";
+          on-click-right = "kitty --hold --class floating-calendar --title Calendar -e khal interactive";
+          tooltip = false;
+        };
+
+        "custom/media" = {
+          format = "{icon}  {}";
+          return-type = "json";
+          format-icons = {
+            Playing = "";
+            Paused  = "󰏤";
+            Stopped = "󰓛";
+          };
+          max-length = 35;
+          exec = ''playerctl -a metadata --format '{"text": "{{artist}} - {{title}}", "tooltip": "{{playerName}}: {{title}}", "alt": "{{status}}", "class": "{{status}}"}' -F 2>/dev/null'';
+          on-click       = "playerctl play-pause";
+          on-click-right = "playerctl next";
+          on-scroll-up   = "playerctl next";
+          on-scroll-down = "playerctl previous";
+        };
+
+        cpu = {
+          interval = 3;
+          format = " {usage}%";
+          tooltip-format = "CPU: {usage}%\nLoad: {load}";
+          on-click = "kitty -e btop";
+        };
+
+        memory = {
+          interval = 5;
+          format = " {percentage}%";
+          tooltip-format = "RAM: {used:0.1f}G / {total:0.1f}G";
+          on-click = "kitty -e btop";
+        };
+
+        temperature = {
+          critical-threshold = 80;
+          interval = 5;
+          format = "{icon} {temperatureC}°C";
+          format-critical = "󰸁 {temperatureC}°C";
+          format-icons = [ "" "" "" "" "" ];
+          tooltip-format = "CPU temp: {temperatureC}°C";
+        };
+
+        battery = {
+          states = { warning = 30; critical = 15; };
+          format = "{icon} {capacity}%";
+          format-charging = "󰂄 {capacity}%";
+          format-plugged  = "󰚥 {capacity}%";
+          format-icons    = [ "󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹" ];
+          tooltip-format  = "Battery: {capacity}%\nTime remaining: {time}";
+        };
+
+        network = {
+          format-wifi         = "󰤨 {essid}";
+          format-ethernet     = "󰈀 {ipaddr}";
+          format-disconnected = "󰤭 Offline";
+          tooltip-format-wifi = "{essid}\n{signaldBm} dBm  ↑{bandwidthUpBits} ↓{bandwidthDownBits}";
+          tooltip-format-ethernet = "{ifname}: {ipaddr}";
+          on-click = "kitty -e nmtui";
+        };
+
+        pulseaudio = {
+          format       = "{icon} {volume}%";
+          format-muted = "󰝟 muted";
+          format-icons = {
+            default   = [ "󰕿" "󰖀" "󰕾" ];
+            headphone = [ "󰋋" ];
+            headset   = [ "󰋎" ];
+          };
+          scroll-step = 2;
+          on-click       = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          on-click-right = "kitty -e pulsemixer";
+          tooltip-format = "{desc}\nVolume: {volume}%";
+        };
+
+        backlight = {
+          format = "{icon} {percent}%";
+          format-icons = [ "󰃞" "󰃟" "󰃠" ];
+          on-click       = "${brightnessScript} up";
+          on-click-right = "kitty --hold -e ${pkgs.brightnessctl}/bin/brightnessctl";
+          on-scroll-up   = "${brightnessScript} up";
+          on-scroll-down = "${brightnessScript} down";
+          tooltip-format = "Brightness: {percent}%";
+        };
+
+        "custom/brightness" = {
+          interval = 5;
+          return-type = "json";
+          exec = "${brightnessStatusScript}";
+          format = "󰃠  {}";
+          on-scroll-up   = "${brightnessScript} up";
+          on-scroll-down = "${brightnessScript} down";
+          on-click       = "${brightnessScript} up";
+        };
+
+        bluetooth = {
+          format           = "󰂯 {status}";
+          format-connected = "󰂱 {device_alias}";
+          format-off       = "󰂲";
+          tooltip-format   = "{controller_alias}\n{controller_address}\n\n{num_connections} connected";
+          on-click         = "blueman-manager";
+        };
+
+        "power-profiles-daemon" = {
+          format = "{icon}";
+          tooltip-format = "Power profile: {profile}\nDriver: {driver}";
+          format-icons = {
+            default       = "󰾅";
+            performance   = "󰓅";
+            balanced      = "󰾅";
+            "power-saver" = "󰌪";
+          };
+        };
+
+        "custom/tailscale" = {
+          interval = 5;
+          return-type = "json";
+          exec = ''bash -c 'status=$(tailscale status --json 2>/dev/null); if [ $? -eq 0 ]; then state=$(echo "$status" | ${pkgs.jq}/bin/jq -r ".BackendState"); ip=$(echo "$status" | ${pkgs.jq}/bin/jq -r ".TailscaleIPs[0] // empty"); exit_node=$(echo "$status" | ${pkgs.jq}/bin/jq -r "if .ExitNodeStatus.Online then .ExitNodeStatus.TailscaleIPs[0] else empty end // empty"); if [ "$state" = "Running" ]; then tooltip="Tailscale: connected"; [ -n "$ip" ] && tooltip="$tooltip\nIP: $ip"; [ -n "$exit_node" ] && tooltip="$tooltip\nExit node active"; echo "{\"text\": \"on\", \"tooltip\": \"$tooltip\", \"class\": \"connected\"}"; else echo "{\"text\": \"off\", \"tooltip\": \"Tailscale: $state\", \"class\": \"disconnected\"}"; fi; else echo "{\"text\": \"off\", \"tooltip\": \"Tailscale: not running\", \"class\": \"disconnected\"}"; fi' '';
+          format = "󰖂 {}";
+          on-click = "tailscale up";
+          on-click-right = "tailscale down";
+        };
+
+        "custom/notification" = {
+          interval = 3;
+          format = "{}";
+          exec = ''bash -c 'p=$(dunstctl is-paused 2>/dev/null); n=$(dunstctl count waiting 2>/dev/null || echo 0); [ "$p" = "true" ] && echo "󰪑 DND" || { [ "$n" -gt 0 ] && echo "󰂚 $n" || echo "󰂜"; }' '';
+          on-click       = "dunstctl set-paused toggle";
+          on-click-right = "dunstctl history-pop";
+          tooltip = false;
+        };
+
+        "custom/power" = {
+          format = "⏻";
+          tooltip = false;
+          on-click = "${powerMenu}";
+        };
+
+        tray = {
+          icon-size = 16;
+          spacing   = 8;
+        };
       };
 
-      "hyprland/window" = {
-        format = "{}";
-        max-length = 50;
+      # ── Shared layout (same module list on every output) ──────────────────
+      sharedLayout = {
+        layer    = "top";
+        position = "top";
+        spacing  = 0;
+        fixed-center = true;
+        margin-left   = 12;
+        margin-right  = 12;
+        margin-bottom = 0;
+        modules-left   = [ "hyprland/workspaces" "hyprland/window" ];
+        modules-center = [ "clock" ];
+        modules-right  = [
+          "custom/media"
+          "cpu" "memory" "temperature"
+          "pulseaudio" "backlight" "battery"
+          "network" "custom/tailscale" "bluetooth" "power-profiles-daemon"
+          "custom/notification" "tray" "custom/power"
+        ];
       };
-
-      clock = {
-        format = " {:%H:%M}";
-        format-alt = " {:%A, %d %B %Y}";
-        tooltip-format = "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>";
-      };
-
-      battery = {
-        states = { warning = 30; critical = 15; };
-        format = "{icon} {capacity}%";
-        format-charging    = " {capacity}%";
-        format-plugged     = " {capacity}%";
-        format-warning     = " {capacity}%";
-        format-critical    = " {capacity}%";
-        format-icons       = [ "" "" "" "" "" ];
-      };
-
-      network = {
-        format-wifi         = " {essid}";
-        format-ethernet     = " {ipaddr}";
-        format-disconnected = "⚠ Disconnected";
-        tooltip-format      = "{ifname}: {ipaddr}\nSignal: {signaldBm} dBm";
-        on-click            = "kitty -e nmtui";
-      };
-
-      pulseaudio = {
-        format        = "{icon} {volume}%";
-        format-muted  = " muted";
-        format-icons  = { default = [ "" "" "" ]; };
-        on-click      = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
-        on-click-right = "kitty -e pulsemixer";
-      };
-
-      backlight = {
-        format = "{icon} {percent}%";
-        format-icons = [ "" "" "" "" "" "" "" "" "" ];
-        on-scroll-up   = "brightnessctl s 5%+";
-        on-scroll-down = "brightnessctl s 5%-";
-      };
-
-      bluetooth = {
-        format          = " {status}";
-        format-connected = " {device_alias}";
-        format-off      = "";
-        tooltip-format  = "{controller_alias}\t{controller_address}\n\n{num_connections} connected";
-        on-click        = "blueman-manager";
-      };
-
-      tray = {
-        spacing = 8;
-      };
-    }];
+    in
+    {
+      enable = true;
+      settings = [
+        # Laptop built-in display — larger
+        (sharedLayout // sharedModules // {
+          output    = "eDP-1";
+          height    = 42;
+          margin-top = 8;
+        })
+        # External monitors — compact (no backlight: /sys/class/backlight is internal-only)
+        (sharedLayout // sharedModules // {
+          output    = "!eDP-1";
+          height    = 34;
+          margin-top = 6;
+          modules-right = [
+            "custom/media"
+            "cpu" "memory" "temperature"
+            "pulseaudio" "custom/brightness" "battery"
+            "network" "custom/tailscale" "bluetooth" "power-profiles-daemon"
+            "custom/notification" "tray" "custom/power"
+          ];
+        })
+      ];
 
     style = ''
       * {
-        font-family: "JetBrainsMono Nerd Font", "Font Awesome 6 Free", "Font Awesome 6 Brands", monospace;
-        font-size: 13px;
+        font-family: "JetBrainsMono Nerd Font", "Font Awesome 6 Free", monospace;
+        font-size: 14px;
         min-height: 0;
+        border: none;
+        border-radius: 0;
+        transition: color 0.2s ease, background-color 0.2s ease;
       }
 
+      /* ── Bar window — transparent so the pills float ── */
       window#waybar {
-        background-color: rgba(40, 42, 54, 0.92);
+        background: transparent;
         color: #f8f8f2;
-        border-bottom: 2px solid #bd93f9;
       }
 
-      .modules-left, .modules-center, .modules-right {
+      /* ── Floating pill groups ── */
+      .modules-left,
+      .modules-center,
+      .modules-right {
+        background: rgba(40, 42, 54, 0.92);
+        border-radius: 14px;
         padding: 0 8px;
+        margin: 5px 4px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+      }
+
+      /* ── Workspaces ── */
+      #workspaces {
+        padding: 0 2px;
       }
 
       #workspaces button {
-        padding: 0 6px;
+        padding: 0 10px;
         color: #6272a4;
         background: transparent;
-        border: none;
-        border-radius: 4px;
-      }
-      #workspaces button.active {
-        color: #f8f8f2;
-        background-color: #44475a;
-      }
-      #workspaces button.urgent {
-        color: #ff5555;
-      }
-
-      #clock {
-        color: #8be9fd;
+        border-radius: 10px;
+        margin: 4px 2px;
         font-weight: bold;
       }
 
-      #battery {
-        color: #50fa7b;
+      #workspaces button:hover {
+        background: rgba(98, 114, 164, 0.25);
+        color: #f8f8f2;
+        border-radius: 10px;
       }
-      #battery.warning {
-        color: #f1fa8c;
+
+      /* Active workspace: only the text colour changes, no background fill */
+      #workspaces button.active {
+        color: #bd93f9;
+        background: transparent;
+        border-radius: 10px;
       }
+
+      #workspaces button.urgent {
+        background: rgba(255, 85, 85, 0.2);
+        color: #ff5555;
+        border-radius: 10px;
+      }
+
+      /* ── Window title ── */
+      #window {
+        color: rgba(248, 248, 242, 0.7);
+        font-style: italic;
+        padding: 0 6px 0 6px;
+      }
+      #window.empty {
+        padding: 0;
+        margin: 0;
+      }
+
+      /* ── Clock ── */
+      #clock {
+        color: #f8f8f2;
+        font-weight: bold;
+        font-size: 15px;
+        letter-spacing: 0.5px;
+        padding: 0 16px;
+      }
+
+      /* ── Shared right-module padding ── */
+      #cpu,
+      #memory,
+      #temperature,
+      #battery,
+      #network,
+      #pulseaudio,
+      #backlight,
+      #bluetooth,
+      #power-profiles-daemon,
+      #custom-media,
+      #custom-tailscale {
+        padding: 0 10px;
+      }
+
+      /* ── Module accent colours ── */
+      #custom-media        { color: #50fa7b; }
+      #custom-media.Paused { color: #6272a4; }
+
+      #cpu    { color: #ff79c6; }
+      #memory { color: #bd93f9; }
+
+      #temperature          { color: #ffb86c; }
+      #temperature.critical { color: #ff5555; }
+
+      #pulseaudio       { color: #bd93f9; }
+      #pulseaudio.muted { color: #6272a4; }
+
+      #backlight,
+      #custom-brightness { color: #f1fa8c; }
+
+      #battery          { color: #50fa7b; }
+      #battery.warning  { color: #f1fa8c; }
       #battery.critical {
         color: #ff5555;
-        animation: blink 0.5s steps(1) infinite;
+        animation: blink 0.6s steps(1) infinite;
       }
       @keyframes blink {
-        to { color: #f8f8f2; }
+        to { color: rgba(248, 248, 242, 0.7); }
       }
 
-      #network {
-        color: #8be9fd;
-      }
-      #network.disconnected {
-        color: #ff5555;
-      }
+      #network             { color: #8be9fd; }
+      #network.disconnected { color: #ff5555; }
 
-      #pulseaudio {
-        color: #bd93f9;
-      }
-      #pulseaudio.muted {
-        color: #6272a4;
-      }
+      #custom-tailscale              { color: #8be9fd; }
+      #custom-tailscale.disconnected { color: #6272a4; }
 
-      #backlight {
-        color: #f1fa8c;
-      }
+      #bluetooth     { color: #8be9fd; }
+      #bluetooth.off { color: #6272a4; }
 
-      #bluetooth {
-        color: #8be9fd;
-      }
-      #bluetooth.off {
-        color: #6272a4;
-      }
+      #power-profiles-daemon { color: #ffb86c; }
 
-      #tray {
-        padding: 0 4px;
-      }
-
-      tooltip {
-        background-color: #282a36;
-        border: 1px solid #44475a;
-        border-radius: 6px;
+      /* ── Notification ── */
+      #custom-notification {
+        padding: 0 10px;
         color: #f8f8f2;
+      }
+      #custom-notification.dnd {
+        color: #6272a4;
+      }
+
+      /* ── Power button ── */
+      #custom-power {
+        padding: 0 12px;
+        color: #ff5555;
+        font-size: 16px;
+      }
+      #custom-power:hover {
+        color: #ff8080;
+      }
+
+      /* ── Tray ── */
+      #tray {
+        padding: 0 6px;
+      }
+      #tray > .passive {
+        -gtk-icon-effect: dim;
+      }
+      #tray > .needs-attention {
+        -gtk-icon-effect: highlight;
+        background: rgba(255, 85, 85, 0.2);
+        border-radius: 6px;
+      }
+
+      /* ── Tooltips ── */
+      tooltip {
+        background: rgba(40, 42, 54, 0.97);
+        border: 1px solid rgba(98, 114, 164, 0.5);
+        border-radius: 10px;
+        padding: 2px 4px;
+      }
+      tooltip label {
+        color: #f8f8f2;
+        font-size: 13px;
+      }
+
+      /* ── External monitor overrides (smaller, compact) ── */
+      /* waybar adds the output name as a CSS class on window#waybar        */
+      /* eDP-1 = laptop built-in; everything else gets the rules below.     */
+      window#waybar:not(.eDP-1) * {
+        font-size: 12px;
+      }
+      window#waybar:not(.eDP-1) #clock {
+        font-size: 13px;
+        padding: 0 12px;
+      }
+      window#waybar:not(.eDP-1) .modules-left,
+      window#waybar:not(.eDP-1) .modules-center,
+      window#waybar:not(.eDP-1) .modules-right {
+        margin: 4px 4px;
+      }
+      window#waybar:not(.eDP-1) #workspaces button {
+        padding: 0 8px;
+        margin: 3px 1px;
+      }
+      window#waybar:not(.eDP-1) #custom-power {
+        font-size: 14px;
+        padding: 0 10px;
+      }
+      window#waybar:not(.eDP-1) #cpu,
+      window#waybar:not(.eDP-1) #memory,
+      window#waybar:not(.eDP-1) #temperature,
+      window#waybar:not(.eDP-1) #battery,
+      window#waybar:not(.eDP-1) #network,
+      window#waybar:not(.eDP-1) #pulseaudio,
+      window#waybar:not(.eDP-1) #backlight,
+      window#waybar:not(.eDP-1) #custom-brightness,
+      window#waybar:not(.eDP-1) #bluetooth,
+      window#waybar:not(.eDP-1) #power-profiles-daemon,
+      window#waybar:not(.eDP-1) #custom-media,
+      window#waybar:not(.eDP-1) #custom-tailscale,
+      window#waybar:not(.eDP-1) #custom-notification {
+        padding: 0 8px;
       }
     '';
   };
@@ -423,13 +862,17 @@
     enable = true;
     systemd.enable = false;
     settings = {
-      monitor = ",preferred,auto,1";
+      monitor = [
+        # Laptop screen: always below any other monitor (auto-down is dynamic)
+        "eDP-1,preferred,auto-down,1"
+        # Any external monitor: top-left corner, preferred resolution
+        ",preferred,0x0,1"
+      ];
 
       exec-once = [
         "swww-daemon"
-        "waypaper --restore"
+        "variety"
         "waybar"
-        "kanshi"
         "wl-paste --type text --watch cliphist store"
         "wl-paste --type image --watch cliphist store"
       ];
@@ -486,10 +929,26 @@
         ];
       };
 
+      misc = {
+        disable_hyprland_logo    = true;
+        disable_splash_rendering = true;
+        force_default_wallpaper  = 0;
+      };
+
       dwindle = {
         pseudotile    = true;
         preserve_split = true;
       };
+
+      windowrule = [
+        "float on, match:class ^(floating-calendar)$"
+        "size 800 600, match:class ^(floating-calendar)$"
+        "center on, match:class ^(floating-calendar)$"
+      ];
+
+      layerrules = [
+        "noanim, fuzzel"
+      ];
 
       "$mod" = "SUPER";
 
@@ -587,8 +1046,8 @@
       bindel = [
         ", XF86AudioRaiseVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
         ", XF86AudioLowerVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
-        ", XF86MonBrightnessUp, exec, brightnessctl s 5%+"
-        ", XF86MonBrightnessDown, exec, brightnessctl s 5%-"
+        ", XF86MonBrightnessUp, exec, ${brightnessScript} up"
+        ", XF86MonBrightnessDown, exec, ${brightnessScript} down"
       ];
       bindl = [
         ", XF86AudioMute, exec, wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
@@ -596,14 +1055,18 @@
         ", XF86AudioNext, exec, playerctl next"
         ", XF86AudioPrev, exec, playerctl previous"
       ];
+
     };
   };
+
 
   # ─── Dunst ────────────────────────────────────────────────────────────────────
   services.dunst = {
     enable = true;
     settings = {
       global = {
+        monitor        = "eDP-1";
+        follow         = "none";
         width          = 320;
         height         = 200;
         offset         = "15x50";
@@ -640,7 +1103,7 @@
         hide_duplicate_count = false;
         show_indicators = true;
 
-        icon_theme     = "Adwaita";
+        icon_theme     = "Papirus-Dark";
         enable_recursive_icon_lookup = true;
         icon_position  = "left";
         min_icon_size  = 32;
@@ -688,6 +1151,7 @@
     };
   };
 
+
   # ─── Cursor Theme ─────────────────────────────────────────────────────────────
   home.pointerCursor = {
     name = "Bibata-Modern-Classic";
@@ -702,26 +1166,81 @@
     settings = {
       general = {
         hide_cursor = true;
-        grace = 5;
+        grace = 0;
       };
+
       background = [{
         color = "rgb(40, 42, 54)";
-        blur_passes = 2;
-        blur_size = 5;
+        blur_passes = 3;
+        blur_size = 7;
+        noise = 0.012;
+        brightness = 0.82;
+        vibrancy = 0.17;
       }];
+
+      # ── Clock ──────────────────────────────────────────────────────────
+      label = [
+        {
+          text = ''cmd[update:1000] echo "$(date +"%H:%M")"'';
+          color = "rgba(248, 248, 242, 1.0)";
+          font_size = 88;
+          font_family = "JetBrains Mono ExtraBold";
+          position = "0, 200";
+          halign = "center";
+          valign = "center";
+          shadow_passes = 3;
+          shadow_size = 6;
+          shadow_color = "rgba(0, 0, 0, 0.5)";
+        }
+        # ── Date ─────────────────────────────────────────────────────────
+        {
+          text = ''cmd[update:60000] echo "$(date +"%A, %d %B %Y")"'';
+          color = "rgba(189, 147, 249, 1.0)";
+          font_size = 18;
+          font_family = "JetBrains Mono";
+          position = "0, 100";
+          halign = "center";
+          valign = "center";
+          shadow_passes = 2;
+          shadow_size = 3;
+          shadow_color = "rgba(0, 0, 0, 0.4)";
+        }
+        # ── User ─────────────────────────────────────────────────────────
+        {
+          text = "󰌾   $USER";
+          color = "rgba(98, 114, 164, 1.0)";
+          font_size = 13;
+          font_family = "JetBrainsMono Nerd Font";
+          position = "0, -120";
+          halign = "center";
+          valign = "center";
+        }
+      ];
+
+      # ── Fingerprint ─────────────────────────────────────────────────────
+      fingerprint = {
+        enabled = true;
+        ready_message = "Scan fingerprint to unlock";
+        present_message = "Scanning…";
+      };
+
+      # ── Password field ─────────────────────────────────────────────────
       input-field = [{
-        size = "250, 50";
+        size = "320, 52";
         outline_thickness = 2;
-        dots_size = 0.25;
-        dots_spacing = 0.3;
+        dots_size = 0.22;
+        dots_spacing = 0.35;
         outer_color = "rgb(189, 147, 249)";
         inner_color = "rgb(68, 71, 90)";
         font_color = "rgb(248, 248, 242)";
-        fade_on_empty = true;
-        placeholder_text = "<i>Password...</i>";
+        check_color = "rgb(80, 250, 123)";
         fail_color = "rgb(255, 85, 85)";
-        fail_text = "<i>$FAIL <b>($ATTEMPTS)</b></i>";
-        position = "0, -20";
+        capslock_color = "rgb(241, 250, 140)";
+        rounding = 10;
+        fade_on_empty = true;
+        placeholder_text = ''<span foreground="##6272a4">  Password</span>'';
+        fail_text = ''<i>$FAIL  <b>($ATTEMPTS)</b></i>'';
+        position = "0, -70";
         halign = "center";
         valign = "center";
       }];
@@ -756,12 +1275,39 @@
     };
   };
 
+  # ─── Kanshi (display profiles) ───────────────────────────────────────────────
+  services.kanshi = {
+    enable = true;
+    profiles = {
+      # Laptop screen only
+      laptop-only = {
+        outputs = [{
+          criteria = "eDP-1";
+          status   = "enable";
+        }];
+      };
+
+      # Any external monitor connected — Hyprland's auto-down rule places
+      # eDP-1 below whatever external is active, regardless of its resolution.
+      docked = {
+        outputs = [
+          { criteria = "*";     status = "enable"; }
+          { criteria = "eDP-1"; status = "enable"; }
+        ];
+      };
+    };
+  };
+
   # ─── GTK ──────────────────────────────────────────────────────────────────────
   gtk = {
     enable = true;
     theme = {
       name    = "Adwaita-dark";
       package = pkgs.gnome-themes-extra;
+    };
+    iconTheme = {
+      name    = "Papirus-Dark";
+      package = pkgs.papirus-icon-theme;
     };
   };
 }
