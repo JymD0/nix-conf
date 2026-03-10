@@ -179,6 +179,7 @@
   # ─── SSH ──────────────────────────────────────────────────────────────────────
   programs.ssh = {
     enable = true;
+    extraConfig = lib.mkForce "";
     matchBlocks = {
       "*" = {
         extraOptions = {

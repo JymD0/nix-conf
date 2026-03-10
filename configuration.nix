@@ -120,6 +120,7 @@
 
   # SSH agent
   programs.ssh.startAgent = true;
+  programs.ssh.extraConfig = lib.mkForce "";
 
   # Enable flakes
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
