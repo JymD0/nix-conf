@@ -34,8 +34,8 @@
     networkmanagerapplet
 
     # Display management
-    wdisplays       # GUI for managing monitors (position, resolution, scale)
-    kanshi          # auto-switch monitor profiles
+    wdisplays
+    kanshi
 
     # Lock screen
     hyprlock
@@ -44,7 +44,7 @@
     fastfetch
     btop
 
-    # Audio mixer (needed by Waybar pulseaudio on-click-right)
+    # Audio mixer
     pulsemixer
 
     # Media control
@@ -56,16 +56,16 @@
     # Fonts
     noto-fonts-color-emoji
     jetbrains-mono
-    font-awesome          # icons for Waybar
-    nerd-fonts.jetbrains-mono  # Nerd Font variant with extra glyphs
+    font-awesome
+    nerd-fonts.jetbrains-mono
 
     # SSH & File Transfer
     termscp
     sshpass
 
     # Wallpaper
-    swww       # animated wallpaper daemon for Wayland
-    waypaper   # GUI frontend for picking / setting wallpapers
+    swww
+    waypaper
 
     # Utilities
     ripgrep
@@ -77,7 +77,6 @@
     # Misc
     xdg-utils
   ]) ++ [
-    # Flake inputs (outside `with pkgs` scope)
     hyprland-contrib.packages.${pkgs.stdenv.hostPlatform.system}.grimblast
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
@@ -118,7 +117,6 @@
       input_delay = 3;
       sync_to_monitor = true;
 
-      # Dracula colors
       foreground           = "#f8f8f2";
       background           = "#282a36";
       selection_foreground = "#ffffff";
@@ -172,22 +170,6 @@
         width = 2;
         radius = 10;
       };
-    };
-  };
-
-  # ─── SSH ──────────────────────────────────────────────────────────────────────
-  programs.ssh = {
-    enable = true;
-    matchBlocks = {
-      "*" = {
-        extraOptions.AddKeysToAgent = "yes";
-      };
-      # Add your SSH hosts here, e.g.:
-      # "homelab" = {
-      #   hostname = "192.168.1.100";
-      #   user = "admin";
-      #   identityFile = "~/.ssh/id_ed25519";
-      # };
     };
   };
 
@@ -435,7 +417,7 @@
   # ─── Hyprland ─────────────────────────────────────────────────────────────────
   wayland.windowManager.hyprland = {
     enable = true;
-    systemd.enable = false; # required when programs.hyprland.withUWSM = true
+    systemd.enable = false;
     settings = {
       monitor = ",preferred,auto,1";
 
