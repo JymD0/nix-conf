@@ -15,11 +15,10 @@
   fonts.fontconfig.enable = true;
 
   # ─── Packages ───────────────────────────────────────────────────────────────────
-  home.packages = with pkgs; [
+  home.packages = (with pkgs; [
     # Screenshots
     grim
     slurp
-    hyprland-contrib.packages.${pkgs.stdenv.hostPlatform.system}.grimblast
 
     # QoL tools
     cliphist
@@ -64,9 +63,6 @@
     termscp
     sshpass
 
-    # Claude Code (hourly-updated flake, avoids nixpkgs timeout issues)
-    claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
-
     # Wallpaper
     swww       # animated wallpaper daemon for Wayland
     waypaper   # GUI frontend for picking / setting wallpapers
@@ -80,6 +76,10 @@
 
     # Misc
     xdg-utils
+  ]) ++ [
+    # Flake inputs (outside `with pkgs` scope)
+    hyprland-contrib.packages.${pkgs.stdenv.hostPlatform.system}.grimblast
+    claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
@@ -179,8 +179,12 @@
   # ─── SSH ──────────────────────────────────────────────────────────────────────
   programs.ssh = {
     enable = true;
-    extraConfig = "AddKeysToAgent yes";
     matchBlocks = {
+      "*" = {
+        extraOptions = {
+          "AddKeysToAgent" = "yes";
+        };
+      };
       # Add your SSH hosts here, e.g.:
       # "homelab" = {
       #   hostname = "192.168.1.100";
