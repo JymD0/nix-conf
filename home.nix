@@ -199,8 +199,12 @@
   # ─── Git ──────────────────────────────────────────────────────────────────────
   programs.git = {
     enable = true;
-    userName = "Your Name";
-    userEmail = "your.email@example.com";
+    settings = {
+      user = {
+        name  = "Your Name";
+        email = "your.email@example.com";
+      };
+    };
   };
 
   # ─── Bash ─────────────────────────────────────────────────────────────────────
