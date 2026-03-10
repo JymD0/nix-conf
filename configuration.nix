@@ -69,8 +69,6 @@
 
   # Power management (critical for laptop battery life)
   services.power-profiles-daemon.enable = true;
-  services.thermald.enable = true;
-
   # Firmware updates (Framework ships updates via fwupd)
   services.fwupd.enable = true;
 
@@ -107,15 +105,6 @@
       GTK = {
         application_prefer_dark_theme = true;
       };
-    };
-  };
-
-  # greetd launches a minimal Hyprland session which regreet renders inside
-  services.greetd = {
-    enable = true;
-    settings.default_session = {
-      command = "${pkgs.hyprland}/bin/Hyprland";
-      user = "greeter";
     };
   };
 
@@ -159,7 +148,6 @@
   xdg.portal = {
     enable = true;
     extraPortals = [
-      pkgs.xdg-desktop-portal-hyprland
       pkgs.xdg-desktop-portal-gtk
     ];
   };

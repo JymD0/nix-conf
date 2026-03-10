@@ -23,7 +23,6 @@
 
     # QoL tools
     cliphist
-    wl-clipboard
 
     # File manager
     nemo
@@ -180,7 +179,6 @@
   # ─── SSH ──────────────────────────────────────────────────────────────────────
   programs.ssh = {
     enable = true;
-    enableDefaultConfig = false;
     extraConfig = "AddKeysToAgent yes";
     matchBlocks = {
       # Add your SSH hosts here, e.g.:
@@ -222,12 +220,8 @@
   # ─── Git ──────────────────────────────────────────────────────────────────────
   programs.git = {
     enable = true;
-    settings = {
-      user = {
-        name  = "Your Name";
-        email = "your.email@example.com";
-      };
-    };
+    userName = "Your Name";
+    userEmail = "your.email@example.com";
   };
 
   # ─── Bash ─────────────────────────────────────────────────────────────────────
