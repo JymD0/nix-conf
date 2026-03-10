@@ -152,22 +152,21 @@
         terminal = "kitty";
         layer = "overlay";
         exit-on-keyboard-focus-loss = true;
-        width = 35;          # columns
+        width = 35;
         lines = 10;
         horizontal-pad = 16;
         vertical-pad = 12;
         inner-pad = 6;
-        border-radius = 10; # rounded corners matching Hyprland rounding
+        border-radius = 10;
       };
       colors = {
-        # Dracula palette — format is RRGGBBaa
-        background = "282a36ee"; # semi-transparent dark
+        background = "282a36ee";
         text       = "f8f8f2ff";
-        match      = "bd93f9ff"; # purple highlight for matched chars
-        selection  = "44475aff"; # selected row background
+        match      = "bd93f9ff";
+        selection  = "44475aff";
         selection-text = "f8f8f2ff";
-        selection-match = "ff79c6ff"; # pink for matched chars in selection
-        border     = "bd93f9ff"; # purple border
+        selection-match = "ff79c6ff";
+        border     = "bd93f9ff";
       };
       border = {
         width = 2;
@@ -179,22 +178,15 @@
   # ─── SSH ──────────────────────────────────────────────────────────────────────
   programs.ssh = {
     enable = true;
-    extraConfig = lib.mkForce "";
     matchBlocks = {
       "*" = {
-        extraOptions = {
-          "AddKeysToAgent" = "yes";
-        };
+        extraOptions.AddKeysToAgent = "yes";
       };
       # Add your SSH hosts here, e.g.:
       # "homelab" = {
       #   hostname = "192.168.1.100";
       #   user = "admin";
       #   identityFile = "~/.ssh/id_ed25519";
-      # };
-      # "vps" = {
-      #   hostname = "your-vps.example.com";
-      #   user = "root";
       # };
     };
   };
@@ -449,7 +441,7 @@
 
       exec-once = [
         "swww-daemon"
-        "waypaper --restore"  # restore last wallpaper on login
+        "waypaper --restore"
         "waybar"
         "kanshi"
         "wl-paste --type text --watch cliphist store"
@@ -463,7 +455,7 @@
       ];
 
       input = {
-        kb_layout = "de";  # matches system-wide XKB layout
+        kb_layout = "de";
         kb_variant = "";
         follow_mouse = 1;
         sensitivity = 0;
@@ -516,7 +508,6 @@
       "$mod" = "SUPER";
 
       bind = [
-        # Core
         "$mod, Q, exec, kitty"
         "$mod, C, killactive,"
         "$mod, M, exit,"
@@ -526,47 +517,36 @@
         "$mod, P, pseudo,"
         "$mod, O, togglesplit,"
 
-        # Apps
         "$mod, B,       exec, zen-browser"
         "$mod SHIFT, D, exec, discord"
         "$mod SHIFT, C, exec, code"
         "$mod SHIFT, T, exec, kitty termscp"
         "$mod SHIFT, M, exec, wdisplays"
 
-        # Screenshots
         ", PRINT,       exec, grimblast copy area"
         "$mod, PRINT,   exec, grimblast copy output"
         "$mod SHIFT, PRINT, exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
 
-        # Clipboard history
         "$mod, X, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
 
-        # Fullscreen & layout
         "$mod, F, fullscreen, 0"
         "$mod SHIFT, F, fullscreen, 1"
         "$mod, TAB, workspace, previous"
         "$mod, S, togglespecialworkspace, magic"
         "$mod SHIFT, S, movetoworkspace, special:magic"
 
-        # Lock screen
         "$mod ALT, L, exec, hyprlock"
-
-        # Center floating window
         "$mod SHIFT, V, centerwindow,"
 
-        # Focus (arrows)
         "$mod, left,  movefocus, l"
         "$mod, right, movefocus, r"
         "$mod, up,    movefocus, u"
         "$mod, down,  movefocus, d"
-
-        # Focus (vim keys)
         "$mod, H, movefocus, l"
         "$mod, J, movefocus, d"
         "$mod, K, movefocus, u"
         "$mod, L, movefocus, r"
 
-        # Move windows
         "$mod SHIFT, left,  movewindow, l"
         "$mod SHIFT, right, movewindow, r"
         "$mod SHIFT, up,    movewindow, u"
@@ -576,7 +556,6 @@
         "$mod SHIFT, K, movewindow, u"
         "$mod SHIFT, L, movewindow, r"
 
-        # Workspaces
         "$mod, 1, workspace, 1"
         "$mod, 2, workspace, 2"
         "$mod, 3, workspace, 3"
@@ -588,7 +567,6 @@
         "$mod, 9, workspace, 9"
         "$mod, 0, workspace, 10"
 
-        # Move to workspace
         "$mod SHIFT, 1, movetoworkspace, 1"
         "$mod SHIFT, 2, movetoworkspace, 2"
         "$mod SHIFT, 3, movetoworkspace, 3"
@@ -600,7 +578,6 @@
         "$mod SHIFT, 9, movetoworkspace, 9"
         "$mod SHIFT, 0, movetoworkspace, 10"
 
-        # Scroll workspaces
         "$mod, mouse_down, workspace, e+1"
         "$mod, mouse_up,   workspace, e-1"
       ];
@@ -725,7 +702,7 @@
     };
   };
 
-  # ─── Cursor Theme ────────────────────────────────────────────────────────────
+  # ─── Cursor Theme ─────────────────────────────────────────────────────────────
   home.pointerCursor = {
     name = "Bibata-Modern-Classic";
     package = pkgs.bibata-cursors;
@@ -733,7 +710,7 @@
     gtk.enable = true;
   };
 
-  # ─── Hyprlock ───────────────────────────────────────────────────────────────
+  # ─── Hyprlock ─────────────────────────────────────────────────────────────────
   programs.hyprlock = {
     enable = true;
     settings = {
@@ -765,7 +742,7 @@
     };
   };
 
-  # ─── Hypridle ───────────────────────────────────────────────────────────────
+  # ─── Hypridle ─────────────────────────────────────────────────────────────────
   services.hypridle = {
     enable = true;
     settings = {
@@ -775,18 +752,15 @@
         after_sleep_cmd = "hyprctl dispatch dpms on";
       };
       listener = [
-        # Dim screen after 5 minutes
         {
           timeout = 300;
           on-timeout = "brightnessctl -s set 30%";
           on-resume = "brightnessctl -r";
         }
-        # Lock screen after 10 minutes
         {
           timeout = 600;
           on-timeout = "loginctl lock-session";
         }
-        # Turn off display after 15 minutes
         {
           timeout = 900;
           on-timeout = "hyprctl dispatch dpms off";
