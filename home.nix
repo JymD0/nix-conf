@@ -96,6 +96,9 @@ in
     # Lock screen
     hyprlock
 
+    # Terminal multiplexer
+    tmux
+
     # System info
     fastfetch
     btop
@@ -108,6 +111,7 @@ in
 
     # Apps
     discord
+    pinta
 
     # Fonts
     noto-fonts-color-emoji
@@ -709,6 +713,7 @@ in
       #window.empty {
         padding: 0;
         margin: 0;
+        min-width: 0;
       }
 
       /* ── Clock ── */
@@ -716,7 +721,6 @@ in
         color: #f8f8f2;
         font-weight: bold;
         font-size: 15px;
-        letter-spacing: 0.5px;
         padding: 0 16px;
       }
 
@@ -971,6 +975,11 @@ in
         ", PRINT,       exec, grimblast copy area"
         "$mod, PRINT,   exec, grimblast copy output"
         "$mod SHIFT, PRINT, exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
+
+        # Screenshot (no Print key alternative)
+        "$mod, S,       exec, grimblast copy area"
+        "$mod SHIFT, S, exec, grimblast copy output"
+        "$mod ALT, S,   exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
 
         "$mod, X, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
 

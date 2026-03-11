@@ -34,7 +34,9 @@ let
         size      = 8
         passes    = 3
       }
-      drop_shadow = false
+      shadow {
+        enabled = false
+      }
     }
 
     animations {
@@ -52,157 +54,6 @@ let
     }
   '';
 
-  # Dracula-themed GTK4 CSS, symlinked into the greeter user's config dir
-  # via systemd-tmpfiles so it is picked up by every regreet launch.
-  regreetCss = pkgs.writeText "regreet-dracula.css" ''
-    /* ── Dracula palette ─────────────────────────────────────── */
-    /* bg=#282a36  darker=#1e1f29  surface=#44475a               */
-    /* comment=#6272a4  fg=#f8f8f2  subtle=#a8a8b3               */
-    /* purple=#bd93f9  pink=#ff79c6  cyan=#8be9fd  green=#50fa7b */
-
-    /* ── Full-screen background ─────────────────────────────── */
-    window, .background {
-      background:
-        radial-gradient(ellipse at 20% 80%, rgba(189,147,249,0.08) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 20%, rgba(139,233,253,0.06) 0%, transparent 50%),
-        linear-gradient(160deg, #1e1f29 0%, #282a36 40%, #1e1f29 100%);
-      color: #f8f8f2;
-    }
-
-    /* ── Login card — frosted glass ─────────────────────────── */
-    frame, .card, box.login {
-      background-color: rgba(68, 71, 90, 0.55);
-      border-radius: 20px;
-      border: 1px solid rgba(98, 114, 164, 0.4);
-      box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(248, 248, 242, 0.03),
-        inset 0 1px 0 rgba(248, 248, 242, 0.06);
-      padding: 24px;
-      margin: 8px;
-    }
-
-    /* ── Typography ─────────────────────────────────────────── */
-    label {
-      color: #f8f8f2;
-    }
-    label.dim-label {
-      color: #6272a4;
-    }
-
-    /* ── Text inputs ────────────────────────────────────────── */
-    entry {
-      background-color: rgba(30, 31, 41, 0.7);
-      color: #f8f8f2;
-      border: 1px solid rgba(98, 114, 164, 0.5);
-      border-radius: 10px;
-      caret-color: #bd93f9;
-      padding: 8px 14px;
-      min-height: 20px;
-      transition: all 200ms ease;
-    }
-    entry:focus {
-      border-color: #bd93f9;
-      box-shadow:
-        0 0 0 2px rgba(189, 147, 249, 0.25),
-        inset 0 0 0 1px rgba(189, 147, 249, 0.15);
-      background-color: rgba(30, 31, 41, 0.9);
-    }
-    entry placeholder {
-      color: rgba(98, 114, 164, 0.7);
-    }
-
-    /* ── Generic buttons ────────────────────────────────────── */
-    button {
-      background-color: transparent;
-      color: #f8f8f2;
-      border-radius: 10px;
-      padding: 6px 16px;
-      min-height: 20px;
-      transition: all 150ms ease;
-    }
-    button:hover {
-      background-color: rgba(98, 114, 164, 0.2);
-    }
-    button:active {
-      background-color: rgba(98, 114, 164, 0.35);
-    }
-
-    /* ── Primary / login button ─────────────────────────────── */
-    button.suggested-action {
-      background: linear-gradient(135deg, #bd93f9 0%, #a87bf5 100%);
-      color: #1e1f29;
-      font-weight: bold;
-      border: none;
-      box-shadow:
-        0 4px 16px rgba(189, 147, 249, 0.3),
-        0 1px 3px rgba(0, 0, 0, 0.2);
-      padding: 8px 28px;
-    }
-    button.suggested-action:hover {
-      background: linear-gradient(135deg, #cfa9fb 0%, #bd93f9 100%);
-      box-shadow:
-        0 6px 24px rgba(189, 147, 249, 0.4),
-        0 2px 6px rgba(0, 0, 0, 0.3);
-    }
-    button.suggested-action:active {
-      background: linear-gradient(135deg, #a87bf5 0%, #9b6de8 100%);
-      box-shadow: 0 2px 8px rgba(189, 147, 249, 0.2);
-    }
-
-    /* ── Session / user dropdowns ───────────────────────────── */
-    combobox button, .combo button {
-      background-color: rgba(68, 71, 90, 0.6);
-      color: #f8f8f2;
-      border: 1px solid rgba(98, 114, 164, 0.4);
-      border-radius: 10px;
-      padding: 6px 12px;
-      min-height: 20px;
-    }
-    combobox button:hover, .combo button:hover {
-      background-color: rgba(68, 71, 90, 0.85);
-      border-color: #bd93f9;
-    }
-
-    /* ── Dropdown popover ───────────────────────────────────── */
-    popover, .popover {
-      background-color: rgba(40, 42, 54, 0.95);
-      border: 1px solid rgba(98, 114, 164, 0.4);
-      border-radius: 12px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-      padding: 4px;
-    }
-    popover modelbutton, .popover modelbutton {
-      border-radius: 8px;
-      padding: 6px 12px;
-      transition: background-color 150ms ease;
-    }
-    row:selected, row:hover,
-    popover modelbutton:hover, .popover modelbutton:hover {
-      background-color: rgba(189, 147, 249, 0.2);
-    }
-    row:selected {
-      background-color: rgba(189, 147, 249, 0.3);
-    }
-
-    /* ── Scrollbar — keep thin and subtle ───────────────────── */
-    scrollbar slider {
-      background-color: rgba(98, 114, 164, 0.3);
-      border-radius: 99px;
-      min-width: 4px;
-    }
-    scrollbar slider:hover {
-      background-color: rgba(189, 147, 249, 0.5);
-    }
-
-    /* ── Power / action buttons row ─────────────────────────── */
-    button.destructive-action {
-      color: #ff5555;
-    }
-    button.destructive-action:hover {
-      background-color: rgba(255, 85, 85, 0.15);
-    }
-  '';
 in
 
 {
@@ -313,21 +164,171 @@ in
     };
     settings = {
       background.fit = "Cover";
-      GTK.application_prefer_dark_theme = true;
+      GTK = {
+        application_prefer_dark_theme = true;
+        cursor_theme_name = "Adwaita";
+      };
+      appearance.greeting_msg = "Welcome back!";
+      widget.clock = {
+        format = "%a %H:%M";
+        resolution = "1s";
+      };
     };
+    extraCss = ''
+      /* ── Dracula palette ─────────────────────────────────────── */
+      /* bg=#282a36  darker=#1e1f29  surface=#44475a               */
+      /* comment=#6272a4  fg=#f8f8f2  subtle=#a8a8b3               */
+      /* purple=#bd93f9  pink=#ff79c6  cyan=#8be9fd  green=#50fa7b */
+
+      /* ── Full-screen background ─────────────────────────────── */
+      window, .background {
+        background:
+          radial-gradient(ellipse at 20% 80%, rgba(189,147,249,0.08) 0%, transparent 50%),
+          radial-gradient(ellipse at 80% 20%, rgba(139,233,253,0.06) 0%, transparent 50%),
+          linear-gradient(160deg, #1e1f29 0%, #282a36 40%, #1e1f29 100%);
+        color: #f8f8f2;
+      }
+
+      /* ── Login card — frosted glass ─────────────────────────── */
+      frame, .card, box.login {
+        background-color: rgba(68, 71, 90, 0.55);
+        border-radius: 20px;
+        border: 1px solid rgba(98, 114, 164, 0.4);
+        box-shadow:
+          0 8px 32px rgba(0, 0, 0, 0.5),
+          0 0 0 1px rgba(248, 248, 242, 0.03),
+          inset 0 1px 0 rgba(248, 248, 242, 0.06);
+        padding: 24px;
+        margin: 8px;
+      }
+
+      /* ── Typography ─────────────────────────────────────────── */
+      label {
+        color: #f8f8f2;
+      }
+      label.dim-label {
+        color: #6272a4;
+      }
+
+      /* ── Text inputs ────────────────────────────────────────── */
+      entry {
+        background-color: rgba(30, 31, 41, 0.7);
+        color: #f8f8f2;
+        border: 1px solid rgba(98, 114, 164, 0.5);
+        border-radius: 10px;
+        caret-color: #bd93f9;
+        padding: 8px 14px;
+        min-height: 20px;
+        transition: all 200ms ease;
+      }
+      entry:focus {
+        border-color: #bd93f9;
+        box-shadow:
+          0 0 0 2px rgba(189, 147, 249, 0.25),
+          inset 0 0 0 1px rgba(189, 147, 249, 0.15);
+        background-color: rgba(30, 31, 41, 0.9);
+      }
+      entry placeholder {
+        color: rgba(98, 114, 164, 0.7);
+      }
+
+      /* ── Generic buttons ────────────────────────────────────── */
+      button {
+        background-color: transparent;
+        color: #f8f8f2;
+        border-radius: 10px;
+        padding: 6px 16px;
+        min-height: 20px;
+        transition: all 150ms ease;
+      }
+      button:hover {
+        background-color: rgba(98, 114, 164, 0.2);
+      }
+      button:active {
+        background-color: rgba(98, 114, 164, 0.35);
+      }
+
+      /* ── Primary / login button ─────────────────────────────── */
+      button.suggested-action {
+        background: linear-gradient(135deg, #bd93f9 0%, #a87bf5 100%);
+        color: #1e1f29;
+        font-weight: bold;
+        border: none;
+        box-shadow:
+          0 4px 16px rgba(189, 147, 249, 0.3),
+          0 1px 3px rgba(0, 0, 0, 0.2);
+        padding: 8px 28px;
+      }
+      button.suggested-action:hover {
+        background: linear-gradient(135deg, #cfa9fb 0%, #bd93f9 100%);
+        box-shadow:
+          0 6px 24px rgba(189, 147, 249, 0.4),
+          0 2px 6px rgba(0, 0, 0, 0.3);
+      }
+      button.suggested-action:active {
+        background: linear-gradient(135deg, #a87bf5 0%, #9b6de8 100%);
+        box-shadow: 0 2px 8px rgba(189, 147, 249, 0.2);
+      }
+
+      /* ── Session / user dropdowns ───────────────────────────── */
+      combobox button, .combo button {
+        background-color: rgba(68, 71, 90, 0.6);
+        color: #f8f8f2;
+        border: 1px solid rgba(98, 114, 164, 0.4);
+        border-radius: 10px;
+        padding: 6px 12px;
+        min-height: 20px;
+      }
+      combobox button:hover, .combo button:hover {
+        background-color: rgba(68, 71, 90, 0.85);
+        border-color: #bd93f9;
+      }
+
+      /* ── Dropdown popover ───────────────────────────────────── */
+      popover, .popover {
+        background-color: rgba(40, 42, 54, 0.95);
+        border: 1px solid rgba(98, 114, 164, 0.4);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        padding: 4px;
+      }
+      popover modelbutton, .popover modelbutton {
+        border-radius: 8px;
+        padding: 6px 12px;
+        transition: background-color 150ms ease;
+      }
+      row:selected, row:hover,
+      popover modelbutton:hover, .popover modelbutton:hover {
+        background-color: rgba(189, 147, 249, 0.2);
+      }
+      row:selected {
+        background-color: rgba(189, 147, 249, 0.3);
+      }
+
+      /* ── Scrollbar — keep thin and subtle ───────────────────── */
+      scrollbar slider {
+        background-color: rgba(98, 114, 164, 0.3);
+        border-radius: 99px;
+        min-width: 4px;
+      }
+      scrollbar slider:hover {
+        background-color: rgba(189, 147, 249, 0.5);
+      }
+
+      /* ── Power / action buttons row ─────────────────────────── */
+      button.destructive-action {
+        color: #ff5555;
+      }
+      button.destructive-action:hover {
+        background-color: rgba(255, 85, 85, 0.15);
+      }
+    '';
   };
 
   # Replace the cage-based greetd command with our Hyprland session.
   services.greetd.settings.default_session.command =
     lib.mkForce "${pkgs.hyprland}/bin/Hyprland --config ${regreetHyprConf}";
 
-  # Symlink Dracula CSS into the greeter user's GTK4 config dir so regreet
-  # picks it up without any runtime path argument.
-  systemd.tmpfiles.rules = [
-    "d  /var/lib/greetd/.config                  0755 greeter greeter -"
-    "d  /var/lib/greetd/.config/gtk-4.0          0755 greeter greeter -"
-    "L+ /var/lib/greetd/.config/gtk-4.0/gtk.css  -    greeter greeter - ${regreetCss}"
-  ];
 
   # Firewall
   networking.firewall = {
@@ -337,7 +338,10 @@ in
   };
 
   # Tailscale
-  services.tailscale.enable = true;
+  services.tailscale = {
+    enable = true;
+    useRoutingFeatures = "client";
+  };
 
   # Docker
   virtualisation.docker.enable = true;
@@ -355,6 +359,8 @@ in
     wget
     curl
     vim
+    gnumake
+    python3
     wl-clipboard
     zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
 
