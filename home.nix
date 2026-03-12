@@ -4,37 +4,42 @@ let
   # Smart brightness control: brightnessctl for internal (eDP-1), ddcutil for external monitors
   brightnessScript = pkgs.writeShellScript "brightness-ctl" ''
     ACTION=$1
-    STEP=5
+    STEP=10
 
     ACTIVE_MON=$(${pkgs.hyprland}/bin/hyprctl activeworkspace -j 2>/dev/null \
       | ${pkgs.jq}/bin/jq -r '.monitor // "eDP-1"')
 
     if [ "$ACTIVE_MON" = "eDP-1" ] || [ -z "$ACTIVE_MON" ]; then
-      case "$ACTION" in
-        up)   ${pkgs.brightnessctl}/bin/brightnessctl s "$STEP%+" -q ;;
-        down) ${pkgs.brightnessctl}/bin/brightnessctl s "$STEP%-" -q ;;
-      esac
       CUR=$(${pkgs.brightnessctl}/bin/brightnessctl g)
       MAX=$(${pkgs.brightnessctl}/bin/brightnessctl m)
       PCT=$(( CUR * 100 / MAX ))
-      LABEL="Internal"
+      case "$ACTION" in
+        up)
+          if [ "$PCT" -ge 100 ]; then
+            ${pkgs.brightnessctl}/bin/brightnessctl s 0 -q
+            ${pkgs.swayosd}/bin/swayosd-client --brightness lower 2>/dev/null || true
+          else
+            ${pkgs.swayosd}/bin/swayosd-client --brightness raise 2>/dev/null || true
+          fi
+          ;;
+        down) ${pkgs.swayosd}/bin/swayosd-client --brightness lower 2>/dev/null || true ;;
+      esac
     else
       CUR=$(${pkgs.ddcutil}/bin/ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
       CUR=''${CUR:-50}
       case "$ACTION" in
-        up)   NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP )) ;;
+        up)
+          if [ "$CUR" -ge 100 ]; then
+            NEW=0
+          else
+            NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP ))
+          fi
+          ;;
         down) NEW=$(( CUR - STEP < 0 ? 0 : CUR - STEP )) ;;
       esac
       ${pkgs.ddcutil}/bin/ddcutil setvcp 10 "$NEW" 2>/dev/null
-      PCT=$NEW
-      LABEL="External"
     fi
 
-    ${pkgs.libnotify}/bin/notify-send \
-      -h string:x-canonical-private-synchronous:brightness \
-      -h "int:value:$PCT" \
-      -t 2000 \
-      "󰃠 Brightness ($LABEL)" "$PCT%"
   '';
 
   brightnessStatusScript = pkgs.writeShellScript "brightness-status" ''
@@ -55,6 +60,7 @@ let
       *"Shut down"*) systemctl poweroff ;;
     esac
   '';
+
 in
 {
   home.username = "yourUsername";
@@ -67,6 +73,79 @@ in
   # Suppress nixpkgs version mismatch warnings
   home.enableNixpkgsReleaseCheck = false;
 
+  # ─── Variety setup (mutable files — variety needs chmod and write access) ────
+  home.activation.varietySetup = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    variety_dir="$HOME/.config/variety"
+    scripts_dir="$variety_dir/scripts"
+    mkdir -p "$scripts_dir" "$variety_dir/Downloaded" "$variety_dir/Favorites" "$variety_dir/Fetched"
+
+    # Only write config if not yet present (let variety manage it after first deploy)
+    if [ ! -f "$variety_dir/variety.conf" ] || [ -L "$variety_dir/variety.conf" ]; then
+      rm -f "$variety_dir/variety.conf"
+      cat > "$variety_dir/variety.conf" << 'CONF'
+# Wallpaper change settings
+change_enabled = True
+change_on_start = True
+change_interval = 1800
+
+# Download settings
+download_enabled = True
+download_interval = 60
+download_folder = ~/.config/variety/Downloaded
+quota_enabled = True
+quota_size = 500
+
+# Folders
+favorites_folder = ~/.config/variety/Favorites
+fetched_folder = ~/.config/variety/Fetched
+
+# Image filtering
+safe_mode = True
+min_size_enabled = True
+min_size = 80
+use_landscape_enabled = True
+lightness_enabled = False
+
+[sources]
+src1 = True|favorites|The Favorites folder
+src2 = True|fetched|The Fetched folder
+src3 = True|unsplash|High-resolution photos from Unsplash.com
+src4 = True|bing|Bing Photo of the Day
+src5 = True|wallhaven|nature dark
+src6 = True|wallhaven|landscape
+src7 = False|apod|NASA's Astronomy Picture of the Day
+src8 = False|desktoppr|Random wallpapers from Desktoppr.co
+src9 = False|earth|World Sunlight Map - live wallpaper from Die.net
+
+[filters]
+CONF
+    fi
+
+    cat > "$scripts_dir/set_wallpaper" << 'SCRIPT'
+#!/bin/sh
+if [ -z "$1" ]; then
+  exit 1
+fi
+${pkgs.swww}/bin/swww img "$1" \
+  --transition-type fade \
+  --transition-duration 1 \
+  --transition-fps 60
+SCRIPT
+    chmod +x "$scripts_dir/set_wallpaper"
+
+    cat > "$scripts_dir/get_wallpaper" << 'SCRIPT'
+#!/bin/sh
+${pkgs.swww}/bin/swww query | grep -oP 'image: \K.*' | head -1
+SCRIPT
+    chmod +x "$scripts_dir/get_wallpaper"
+
+    cat > "$scripts_dir/set_lock_screen" << 'SCRIPT'
+#!/bin/sh
+exit 0
+SCRIPT
+    chmod +x "$scripts_dir/set_lock_screen"
+  '';
+
   # ─── Fonts ─────────────────────────────────────────────────────────────────────
   fonts.fontconfig.enable = true;
 
@@ -78,11 +157,12 @@ in
 
     # QoL tools
     cliphist
+    bemoji
 
     # File manager
     nemo
 
-    # Notifications
+    # Notifications (libnotify needed by various apps)
     libnotify
 
     # Bluetooth & network (needed by Waybar on-click actions)
@@ -128,7 +208,6 @@ in
 
     # Wallpaper
     swww
-    waypaper
     variety
 
     # Calendar
@@ -185,67 +264,6 @@ in
     };
 
     configFile = {
-      # ─── Variety wallpaper config ───────────────────────────────────────────────
-      "variety/variety.conf".text = ''
-        # Wallpaper change settings
-        change_enabled = True
-        change_on_start = True
-        change_interval = 1800
-
-        # Download settings
-        download_enabled = True
-        download_interval = 60
-        download_folder = ~/.config/variety/Downloaded
-        quota_enabled = True
-        quota_size = 500
-
-        # Folders
-        favorites_folder = ~/.config/variety/Favorites
-        fetched_folder = ~/.config/variety/Fetched
-
-        # Image filtering
-        safe_mode = True
-        min_size_enabled = True
-        min_size = 80
-        use_landscape_enabled = True
-        lightness_enabled = False
-
-        [sources]
-        src1 = True|favorites|The Favorites folder
-        src2 = True|fetched|The Fetched folder
-        src3 = True|unsplash|High-resolution photos from Unsplash.com
-        src4 = True|bing|Bing Photo of the Day
-        src5 = True|wallhaven|nature dark
-        src6 = True|wallhaven|landscape
-        src7 = False|apod|NASA's Astronomy Picture of the Day
-        src8 = False|desktoppr|Random wallpapers from Desktoppr.co
-        src9 = False|earth|World Sunlight Map - live wallpaper from Die.net
-
-        [filters]
-      '';
-
-      # Custom set_wallpaper script using swww
-      "variety/scripts/set_wallpaper".source =
-        let
-          script = pkgs.writeShellScript "variety-set-wallpaper" ''
-            if [ -z "$1" ]; then
-              exit 1
-            fi
-            ${pkgs.swww}/bin/swww img "$1" \
-              --transition-type fade \
-              --transition-duration 1 \
-              --transition-fps 60
-          '';
-        in script;
-
-      # Variety also needs a get_wallpaper script
-      "variety/scripts/get_wallpaper".source =
-        let
-          script = pkgs.writeShellScript "variety-get-wallpaper" ''
-            ${pkgs.swww}/bin/swww query | grep -oP 'image: \K.*' | head -1
-          '';
-        in script;
-
       # ─── khal calendar config ─────────────────────────────────────────────────
       "khal/config".text = ''
         [calendars]
@@ -446,11 +464,13 @@ in
           sort-by-number = true;
         };
 
-        # Collapse when empty so it doesn't leave a blank gap in the left pill.
         "hyprland/window" = {
           format = "{}";
           max-length = 50;
           separate-outputs = true;
+          rewrite = {
+            "^$" = "Desktop";
+          };
         };
 
         clock = {
@@ -526,7 +546,7 @@ in
             headset   = [ "󰋎" ];
           };
           scroll-step = 2;
-          on-click       = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle";
+          on-click       = "${pkgs.swayosd}/bin/swayosd-client --output-volume mute-toggle";
           on-click-right = "kitty -e pulsemixer";
           tooltip-format = "{desc}\nVolume: {volume}%";
         };
@@ -536,8 +556,8 @@ in
           format-icons = [ "󰃞" "󰃟" "󰃠" ];
           on-click       = "${brightnessScript} up";
           on-click-right = "kitty --hold -e ${pkgs.brightnessctl}/bin/brightnessctl";
-          on-scroll-up   = "${brightnessScript} up";
-          on-scroll-down = "${brightnessScript} down";
+          on-scroll-up   = "${pkgs.swayosd}/bin/swayosd-client --brightness raise";
+          on-scroll-down = "${pkgs.swayosd}/bin/swayosd-client --brightness lower";
           tooltip-format = "Brightness: {percent}%";
         };
 
@@ -550,6 +570,9 @@ in
           on-scroll-down = "${brightnessScript} down";
           on-click       = "${brightnessScript} up";
         };
+
+        # SwayOSD handles internal brightness natively — the custom/brightness
+        # module with ddcutil is only shown on external monitors (see modules-right).
 
         bluetooth = {
           format           = "󰂯 {status}";
@@ -582,9 +605,9 @@ in
         "custom/notification" = {
           interval = 3;
           format = "{}";
-          exec = ''bash -c 'p=$(dunstctl is-paused 2>/dev/null); n=$(dunstctl count waiting 2>/dev/null || echo 0); [ "$p" = "true" ] && echo "󰪑 DND" || { [ "$n" -gt 0 ] && echo "󰂚 $n" || echo "󰂜"; }' '';
-          on-click       = "dunstctl set-paused toggle";
-          on-click-right = "dunstctl history-pop";
+          exec = ''bash -c 'dnd=$(swaync-client -D 2>/dev/null); n=$(swaync-client -c 2>/dev/null || echo 0); [ "$dnd" = "true" ] && echo "󰪑 DND" || { [ "$n" -gt 0 ] && echo "󰂚 $n" || echo "󰂜"; }' '';
+          on-click       = "swaync-client -t -sw";
+          on-click-right = "swaync-client -d -sw";
           tooltip = false;
         };
 
@@ -664,11 +687,11 @@ in
       .modules-left,
       .modules-center,
       .modules-right {
-        background: rgba(40, 42, 54, 0.92);
+        background: #282a36;
         border-radius: 14px;
         padding: 0 8px;
         margin: 5px 4px;
-        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+        box-shadow: none;
       }
 
       /* ── Workspaces ── */
@@ -677,12 +700,17 @@ in
       }
 
       #workspaces button {
-        padding: 0 10px;
+        padding: 0;
+        min-width: 28px;
         color: #6272a4;
         background: transparent;
         border-radius: 10px;
         margin: 4px 2px;
         font-weight: bold;
+      }
+
+      #workspaces button label {
+        min-width: 28px;
       }
 
       #workspaces button:hover {
@@ -711,9 +739,7 @@ in
         padding: 0 6px 0 6px;
       }
       #window.empty {
-        padding: 0;
-        margin: 0;
-        min-width: 0;
+        padding: 0 6px;
       }
 
       /* ── Clock ── */
@@ -721,7 +747,7 @@ in
         color: #f8f8f2;
         font-weight: bold;
         font-size: 15px;
-        padding: 0 16px;
+        padding: 2px 18px 0 10px;
       }
 
       /* ── Shared right-module padding ── */
@@ -836,8 +862,12 @@ in
         margin: 4px 4px;
       }
       window#waybar:not(.eDP-1) #workspaces button {
-        padding: 0 8px;
+        padding: 0;
+        min-width: 24px;
         margin: 3px 1px;
+      }
+      window#waybar:not(.eDP-1) #workspaces button label {
+        min-width: 24px;
       }
       window#waybar:not(.eDP-1) #custom-power {
         font-size: 14px;
@@ -864,7 +894,7 @@ in
   # ─── Hyprland ─────────────────────────────────────────────────────────────────
   wayland.windowManager.hyprland = {
     enable = true;
-    systemd.enable = false;
+    systemd.enable = true;
     settings = {
       monitor = [
         # Laptop screen: always below any other monitor (auto-down is dynamic)
@@ -874,6 +904,7 @@ in
       ];
 
       exec-once = [
+        "hyprlock"
         "swww-daemon"
         "variety"
         "waybar"
@@ -885,6 +916,8 @@ in
         "XCURSOR_SIZE,24"
         "HYPRCURSOR_SIZE,24"
         "TERMINAL,kitty"
+        "AQ_MGPU_NO_EXPLICIT,1" # Workaround for eglDupNativeFenceFDANDROID crash on AMD Phoenix iGPU (#9746)
+        "AQ_NO_ATOMIC,1"        # Disable atomic modesetting to prevent GPU fence crashes
       ];
 
       input = {
@@ -961,7 +994,7 @@ in
         "$mod, C, killactive,"
         "$mod, M, exit,"
         "$mod, E, exec, nemo"
-        "$mod, V, togglefloating,"
+        "$mod, V, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
         "$mod, R, exec, fuzzel"
         "$mod, P, pseudo,"
         "$mod, O, togglesplit,"
@@ -981,7 +1014,8 @@ in
         "$mod SHIFT, S, exec, grimblast copy output"
         "$mod ALT, S,   exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
 
-        "$mod, X, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
+        "$mod, X, togglefloating,"
+        "$mod, Period, exec, bemoji -t"
 
         "$mod, F, fullscreen, 0"
         "$mod SHIFT, F, fullscreen, 1"
@@ -1053,13 +1087,13 @@ in
       ];
 
       bindel = [
-        ", XF86AudioRaiseVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
-        ", XF86AudioLowerVolume, exec, wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
-        ", XF86MonBrightnessUp, exec, ${brightnessScript} up"
-        ", XF86MonBrightnessDown, exec, ${brightnessScript} down"
+        ", XF86AudioRaiseVolume, exec, ${pkgs.swayosd}/bin/swayosd-client --output-volume raise"
+        ", XF86AudioLowerVolume, exec, ${pkgs.swayosd}/bin/swayosd-client --output-volume lower"
+        ", XF86MonBrightnessUp, exec, ${pkgs.swayosd}/bin/swayosd-client --brightness raise"
+        ", XF86MonBrightnessDown, exec, ${pkgs.swayosd}/bin/swayosd-client --brightness lower"
       ];
       bindl = [
-        ", XF86AudioMute, exec, wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+        ", XF86AudioMute, exec, ${pkgs.swayosd}/bin/swayosd-client --output-volume mute-toggle"
         ", XF86AudioPlay, exec, playerctl play-pause"
         ", XF86AudioNext, exec, playerctl next"
         ", XF86AudioPrev, exec, playerctl previous"
@@ -1069,95 +1103,287 @@ in
   };
 
 
-  # ─── Dunst ────────────────────────────────────────────────────────────────────
-  services.dunst = {
+  # ─── SwayOSD (on-screen display for volume/brightness) ────────────────────────
+  services.swayosd = {
     enable = true;
+    topMargin = 0.85;
+    stylePath =
+      let
+        css = pkgs.writeText "swayosd-dracula.css" ''
+          window#osd {
+            padding: 12px 20px;
+            border-radius: 14px;
+            border: 2px solid rgba(189, 147, 249, 0.6);
+            background-color: rgba(40, 42, 54, 0.92);
+          }
+          #container {
+            margin: 6px;
+          }
+          image, label {
+            color: #f8f8f2;
+          }
+          progressbar:disabled,
+          image:disabled {
+            opacity: 0.5;
+          }
+          progressbar {
+            min-height: 6px;
+            min-width: 0;
+            border-radius: 999px;
+            background: transparent;
+            border: none;
+          }
+          trough {
+            min-height: 6px;
+            min-width: 0;
+            border-radius: 999px;
+            background-color: #44475a;
+            border: none;
+          }
+          progress {
+            min-height: 6px;
+            min-width: 0;
+            border-radius: 999px;
+            background-color: #bd93f9;
+            border: none;
+          }
+        '';
+      in "${css}";
+  };
+
+  # ─── SwayNC (notification center) ──────────────────────────────────────────
+  services.swaync = {
+    enable = true;
+
     settings = {
-      global = {
-        monitor        = "eDP-1";
-        follow         = "none";
-        width          = 320;
-        height         = 200;
-        offset         = "15x50";
-        origin         = "top-right";
-        scale          = 0;
-        gap_size        = 6;
+      positionX = "right";
+      positionY = "top";
+      layer = "overlay";
+      control-center-layer = "top";
+      cssPriority = "application";
 
-        progress_bar                  = true;
-        progress_bar_height           = 10;
-        progress_bar_frame_width      = 1;
-        progress_bar_min_width        = 150;
-        progress_bar_max_width        = 300;
-        progress_bar_corner_radius    = 4;
+      notification-window-width = 360;
+      notification-icon-size = 48;
+      notification-body-image-height = 100;
+      notification-body-image-width = 200;
 
-        transparency   = 10;
-        corner_radius  = 8;
-        frame_width    = 2;
-        frame_color    = "#bd93f9";
-        separator_color = "frame";
-        separator_height = 2;
-        padding        = 10;
-        horizontal_padding = 12;
-        text_icon_padding  = 8;
+      timeout = 8;
+      timeout-low = 4;
+      timeout-critical = 0;
 
-        font           = "JetBrains Mono 10";
-        line_height    = 0;
-        markup         = "full";
-        format         = "<b>%s</b>\\n%b";
-        alignment      = "left";
-        vertical_alignment = "center";
-        ellipsize      = "middle";
-        ignore_newline = false;
-        stack_duplicates = true;
-        hide_duplicate_count = false;
-        show_indicators = true;
+      fit-to-screen = true;
+      control-center-width = 400;
+      control-center-height = 600;
+      control-center-margin-top = 10;
+      control-center-margin-bottom = 10;
+      control-center-margin-right = 10;
 
-        icon_theme     = "Papirus-Dark";
-        enable_recursive_icon_lookup = true;
-        icon_position  = "left";
-        min_icon_size  = 32;
-        max_icon_size  = 48;
+      hide-on-clear = true;
+      hide-on-action = true;
 
-        sticky_history = true;
-        history_length = 20;
+      widgets = [
+        "title"
+        "dnd"
+        "notifications"
+      ];
 
-        dmenu          = "${pkgs.fuzzel}/bin/fuzzel --dmenu";
-        browser        = "${pkgs.xdg-utils}/bin/xdg-open";
-        always_run_script = true;
-        title          = "Dunst";
-        class          = "Dunst";
-        ignore_dbusclose = false;
-        force_xwayland  = false;
-        force_xinerama  = false;
-        mouse_left_click   = "close_current";
-        mouse_middle_click = "do_action, close_current";
-        mouse_right_click  = "close_all";
-      };
-
-      urgency_low = {
-        background = "#282a36";
-        foreground = "#f8f8f2";
-        frame_color = "#6272a4";
-        timeout    = 4;
-        icon       = "dialog-information";
-      };
-
-      urgency_normal = {
-        background = "#282a36";
-        foreground = "#f8f8f2";
-        frame_color = "#bd93f9";
-        timeout    = 8;
-        icon       = "dialog-information";
-      };
-
-      urgency_critical = {
-        background = "#282a36";
-        foreground = "#ff5555";
-        frame_color = "#ff5555";
-        timeout    = 0;
-        icon       = "dialog-warning";
+      widget-config = {
+        title = {
+          text = "Notifications";
+          clear-all-button = true;
+          button-text = "Clear All";
+        };
+        dnd = {
+          text = "Do Not Disturb";
+        };
       };
     };
+
+    style = ''
+      @define-color bg      rgba(40, 42, 54, 0.95);
+      @define-color bg-solid #282a36;
+      @define-color fg      #f8f8f2;
+      @define-color comment #6272a4;
+      @define-color purple  #bd93f9;
+      @define-color pink    #ff79c6;
+      @define-color cyan    #8be9fd;
+      @define-color green   #50fa7b;
+      @define-color red     #ff5555;
+      @define-color yellow  #f1fa8c;
+      @define-color orange  #ffb86c;
+      @define-color current #44475a;
+
+      * {
+        font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", monospace;
+        font-size: 13px;
+      }
+
+      /* ── Notification popups ── */
+
+      .notification-row {
+        outline: none;
+        background: transparent;
+      }
+
+      .notification-row:focus,
+      .notification-row:hover {
+        background: transparent;
+      }
+
+      .notification-row .notification-background {
+        background: transparent;
+      }
+
+      .notification-group {
+        background: transparent;
+      }
+
+      .notification-group:focus,
+      .notification-group:hover {
+        background: transparent;
+      }
+
+      .notification-group .notification-group-headers,
+      .notification-group .notification-group-buttons {
+        background: transparent;
+      }
+
+      .notification {
+        background: @bg;
+        border-radius: 12px;
+        border: 2px solid @comment;
+        margin: 4px 10px;
+        padding: 0;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+      }
+
+      .notification-content {
+        padding: 10px 14px;
+        color: @fg;
+      }
+
+      .notification .summary {
+        font-weight: bold;
+        color: @fg;
+      }
+
+      .notification .body {
+        color: @comment;
+      }
+
+      .notification .time {
+        color: @comment;
+        font-size: 11px;
+      }
+
+      .notification:hover {
+        border-color: @purple;
+      }
+
+      .critical .notification {
+        border-color: @red;
+      }
+
+      .low .notification {
+        border-color: @current;
+      }
+
+      /* ── Close button ── */
+      .close-button {
+        background: @current;
+        color: @fg;
+        border-radius: 6px;
+        padding: 2px 6px;
+        margin: 6px;
+        border: none;
+      }
+      .close-button:hover {
+        background: @red;
+      }
+
+      /* ── Notification actions ── */
+      .notification-action {
+        background: @current;
+        color: @fg;
+        border-radius: 8px;
+        border: none;
+        margin: 4px;
+        padding: 6px 12px;
+      }
+      .notification-action:hover {
+        background: @purple;
+        color: @bg-solid;
+      }
+
+      /* ── Control center ── */
+      .control-center {
+        background: @bg;
+        border-radius: 14px;
+        border: 2px solid rgba(98, 114, 164, 0.5);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        margin: 8px;
+        padding: 10px;
+      }
+
+      /* ── Title widget ── */
+      .widget-title {
+        color: @fg;
+        font-weight: bold;
+        font-size: 15px;
+        margin: 6px 8px;
+      }
+      .widget-title > button {
+        background: @current;
+        color: @fg;
+        border-radius: 8px;
+        border: none;
+        padding: 4px 12px;
+        font-size: 12px;
+      }
+      .widget-title > button:hover {
+        background: @red;
+      }
+
+      /* ── DND toggle ── */
+      .widget-dnd {
+        margin: 4px 8px;
+        color: @fg;
+      }
+      .widget-dnd > switch {
+        background: @current;
+        border-radius: 12px;
+        border: none;
+      }
+      .widget-dnd > switch:checked {
+        background: @purple;
+      }
+      .widget-dnd > switch slider {
+        background: @fg;
+        border-radius: 10px;
+        min-width: 16px;
+        min-height: 16px;
+      }
+
+      /* ── Notifications in control center ── */
+      .control-center .notification {
+        margin: 4px 2px;
+      }
+
+      /* ── Progress bars (volume/brightness from apps) ── */
+      progressbar {
+        min-height: 6px;
+      }
+      trough {
+        background: @current;
+        border-radius: 999px;
+        min-height: 6px;
+      }
+      progress {
+        background: @purple;
+        border-radius: 999px;
+        min-height: 6px;
+      }
+    '';
   };
 
 
@@ -1175,7 +1401,6 @@ in
     settings = {
       general = {
         hide_cursor = true;
-        grace = 0;
       };
 
       background = [{
@@ -1227,10 +1452,12 @@ in
       ];
 
       # ── Fingerprint ─────────────────────────────────────────────────────
-      fingerprint = {
-        enabled = true;
-        ready_message = "Scan fingerprint to unlock";
-        present_message = "Scanning…";
+      auth = {
+        fingerprint = {
+          enabled = true;
+          ready_message = "Scan fingerprint to unlock";
+          present_message = "Scanning…";
+        };
       };
 
       # ── Password field ─────────────────────────────────────────────────
@@ -1287,24 +1514,26 @@ in
   # ─── Kanshi (display profiles) ───────────────────────────────────────────────
   services.kanshi = {
     enable = true;
-    profiles = {
+    settings = [
       # Laptop screen only
-      laptop-only = {
-        outputs = [{
+      {
+        profile.name = "laptop-only";
+        profile.outputs = [{
           criteria = "eDP-1";
           status   = "enable";
         }];
-      };
+      }
 
       # Any external monitor connected — Hyprland's auto-down rule places
       # eDP-1 below whatever external is active, regardless of its resolution.
-      docked = {
-        outputs = [
+      {
+        profile.name = "docked";
+        profile.outputs = [
           { criteria = "*";     status = "enable"; }
           { criteria = "eDP-1"; status = "enable"; }
         ];
-      };
-    };
+      }
+    ];
   };
 
   # ─── GTK ──────────────────────────────────────────────────────────────────────
