@@ -16,21 +16,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    hyprland-contrib = {
-      url = "github:hyprwm/contrib";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
     claude-code = {
       url = "github:sadjow/claude-code-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, hyprland-contrib, claude-code, ... }: {
+  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, ... }: {
     nixosConfigurations.yourHostname = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit zen-browser hyprland-contrib claude-code; };
+      specialArgs = { inherit zen-browser claude-code; };
       modules = [
         # Framework 16 AMD hardware support
         nixos-hardware.nixosModules.framework-16-7040-amd
@@ -41,7 +36,7 @@
         {
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
-          home-manager.extraSpecialArgs = { inherit hyprland-contrib claude-code; };
+          home-manager.extraSpecialArgs = { inherit claude-code; };
           home-manager.users.yourUsername = import ./home.nix;
         }
       ];

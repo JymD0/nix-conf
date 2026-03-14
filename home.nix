@@ -1,4 +1,4 @@
-{ config, pkgs, lib, hyprland-contrib, claude-code, ... }:
+{ config, pkgs, lib, claude-code, ... }:
 
 let
   # Smart brightness control: brightnessctl for internal (eDP-1), ddcutil for external monitors
@@ -130,6 +130,7 @@ ${pkgs.swww}/bin/swww img "$1" \
   --transition-type fade \
   --transition-duration 1 \
   --transition-fps 60
+ln -sf "$1" "$HOME/.current-wallpaper"
 SCRIPT
     chmod +x "$scripts_dir/set_wallpaper"
 
@@ -154,6 +155,7 @@ SCRIPT
     # Screenshots
     grim
     slurp
+    satty
 
     # QoL tools
     cliphist
@@ -221,10 +223,18 @@ SCRIPT
     unzip
     p7zip
 
+    # Jupyter
+    (python3.withPackages (ps: with ps; [
+      jupyter
+      notebook
+      numpy
+      pandas
+      matplotlib
+    ]))
+
     # Misc
     xdg-utils
   ]) ++ [
-    hyprland-contrib.packages.${pkgs.stdenv.hostPlatform.system}.grimblast
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
 
@@ -931,6 +941,11 @@ SCRIPT
         };
       };
 
+      cursor = {
+        no_hardware_cursors = true;
+        inactive_timeout = 0;
+      };
+
       general = {
         gaps_in  = 5;
         gaps_out = 10;
@@ -963,6 +978,8 @@ SCRIPT
           "border, 1, 10, default"
           "fade, 1, 7, default"
           "workspaces, 1, 6, default"
+          "layersIn, 1, 5, default, fade"
+          "layersOut, 1, 5, default, fade"
         ];
       };
 
@@ -981,6 +998,10 @@ SCRIPT
         "float on, match:class ^(floating-calendar)$"
         "size 800 600, match:class ^(floating-calendar)$"
         "center on, match:class ^(floating-calendar)$"
+
+        "float on, match:class ^(com.gabm.satty)$"
+        "size 60% 70%, match:class ^(com.gabm.satty)$"
+        "center on, match:class ^(com.gabm.satty)$"
       ];
 
       layerrules = [
@@ -1005,14 +1026,14 @@ SCRIPT
         "$mod SHIFT, T, exec, kitty termscp"
         "$mod SHIFT, M, exec, wdisplays"
 
-        ", PRINT,       exec, grimblast copy area"
-        "$mod, PRINT,   exec, grimblast copy output"
-        "$mod SHIFT, PRINT, exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
+        # Screenshots: grim → save + clipboard + notification (click to edit in satty)
+        ''$mod, S,       exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim -g "$(slurp)" "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
+        ''$mod SHIFT, S, exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
+        ''$mod ALT, S,   exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim -g "$(hyprctl -j activewindow | jq -r '\"\\(.at[0]),\\(.at[1]) \\(.size[0])x\\(.size[1])\"')" "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
 
-        # Screenshot (no Print key alternative)
-        "$mod, S,       exec, grimblast copy area"
-        "$mod SHIFT, S, exec, grimblast copy output"
-        "$mod ALT, S,   exec, grimblast save area ~/Pictures/$(date +%Y-%m-%d_%H-%M-%S).png"
+        '', PRINT,       exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim -g "$(slurp)" "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
+        ''$mod, PRINT,   exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
+        ''$mod SHIFT, PRINT, exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim -g "$(hyprctl -j activewindow | jq -r '\"\\(.at[0]),\\(.at[1]) \\(.size[0])x\\(.size[1])\"')" "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
 
         "$mod, X, togglefloating,"
         "$mod, Period, exec, bemoji -t"
@@ -1020,10 +1041,10 @@ SCRIPT
         "$mod, F, fullscreen, 0"
         "$mod SHIFT, F, fullscreen, 1"
         "$mod, TAB, workspace, previous"
-        "$mod, S, togglespecialworkspace, magic"
-        "$mod SHIFT, S, movetoworkspace, special:magic"
+        "$mod, G, togglespecialworkspace, magic"
+        "$mod SHIFT, G, movetoworkspace, special:magic"
 
-        "$mod ALT, L, exec, hyprlock"
+        "$mod, L, exec, hyprlock"
         "$mod SHIFT, V, centerwindow,"
 
         "$mod, left,  movefocus, l"
@@ -1401,15 +1422,27 @@ SCRIPT
     settings = {
       general = {
         hide_cursor = true;
+        grace = 3;
       };
 
       background = [{
-        color = "rgb(40, 42, 54)";
+        path = "${config.home.homeDirectory}/.current-wallpaper";
+        crossfade_time = 1.5;
+      }];
+
+      # ── Blurred box behind widgets ──────────────────────────────────────
+      shape = [{
+        size = "460, 440";
+        color = "rgba(40, 42, 54, 0.55)";
+        rounding = 24;
+        blur_size = 6;
         blur_passes = 3;
-        blur_size = 7;
-        noise = 0.012;
-        brightness = 0.82;
-        vibrancy = 0.17;
+        noise = 0.01;
+        border_size = 2;
+        border_color = "rgba(189, 147, 249, 0.25)";
+        position = "0, 15";
+        halign = "center";
+        valign = "center";
       }];
 
       # ── Clock ──────────────────────────────────────────────────────────
@@ -1419,7 +1452,7 @@ SCRIPT
           color = "rgba(248, 248, 242, 1.0)";
           font_size = 88;
           font_family = "JetBrains Mono ExtraBold";
-          position = "0, 200";
+          position = "0, 130";
           halign = "center";
           valign = "center";
           shadow_passes = 3;
@@ -1428,11 +1461,11 @@ SCRIPT
         }
         # ── Date ─────────────────────────────────────────────────────────
         {
-          text = ''cmd[update:60000] echo "$(date +"%A, %d %B %Y")"'';
+          text = ''cmd[update:60000] echo "$(LC_TIME=en_US.UTF-8 date +"%A, %d %B %Y")"'';
           color = "rgba(189, 147, 249, 1.0)";
-          font_size = 18;
+          font_size = 16;
           font_family = "JetBrains Mono";
-          position = "0, 100";
+          position = "0, 40";
           halign = "center";
           valign = "center";
           shadow_passes = 2;
@@ -1445,7 +1478,7 @@ SCRIPT
           color = "rgba(98, 114, 164, 1.0)";
           font_size = 13;
           font_family = "JetBrainsMono Nerd Font";
-          position = "0, -120";
+          position = "0, -40";
           halign = "center";
           valign = "center";
         }
@@ -1462,7 +1495,7 @@ SCRIPT
 
       # ── Password field ─────────────────────────────────────────────────
       input-field = [{
-        size = "320, 52";
+        size = "340, 50";
         outline_thickness = 2;
         dots_size = 0.22;
         dots_spacing = 0.35;
@@ -1472,11 +1505,11 @@ SCRIPT
         check_color = "rgb(80, 250, 123)";
         fail_color = "rgb(255, 85, 85)";
         capslock_color = "rgb(241, 250, 140)";
-        rounding = 10;
-        fade_on_empty = true;
+        rounding = 12;
+        fade_on_empty = false;
         placeholder_text = ''<span foreground="##6272a4">  Password</span>'';
         fail_text = ''<i>$FAIL  <b>($ATTEMPTS)</b></i>'';
-        position = "0, -70";
+        position = "0, -110";
         halign = "center";
         valign = "center";
       }];
