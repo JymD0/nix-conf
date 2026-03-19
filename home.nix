@@ -55,10 +55,85 @@ let
       *Lock*)        hyprlock ;;
       *Suspend*)     systemctl suspend ;;
       *"Log out"*)   hyprctl dispatch exit 0 ;;
-      *Hibernate*)   systemctl hibernate ;;
+      *Hibernate*)
+        notify-send -u critical -i system-hibernate "Hibernating…" "Saving RAM to disk — do not close the lid"
+        systemctl hibernate
+        ;;
       *Reboot*)      systemctl reboot ;;
       *"Shut down"*) systemctl poweroff ;;
     esac
+  '';
+
+  # Live watt draw — shown next to battery module, no icon (battery module already has one)
+  powerDrawScript = pkgs.writeShellScript "power-draw" ''
+    STATUS=$(cat /sys/class/power_supply/BAT1/status 2>/dev/null || echo "Unknown")
+    if [ -f /sys/class/power_supply/BAT1/power_now ]; then
+      POWER=$(cat /sys/class/power_supply/BAT1/power_now)
+    else
+      CURRENT=$(cat /sys/class/power_supply/BAT1/current_now 2>/dev/null || echo 0)
+      VOLTAGE=$(cat /sys/class/power_supply/BAT1/voltage_now 2>/dev/null || echo 0)
+      POWER=$(( CURRENT * VOLTAGE / 1000000 ))
+    fi
+    if [ "$POWER" -gt 0 ] 2>/dev/null; then
+      WATTS=$(echo "scale=1; $POWER / 1000000" | ${pkgs.bc}/bin/bc)
+    else
+      WATTS="0"
+    fi
+    case "$STATUS" in
+      Discharging)
+        printf '{"text":"-%sW","tooltip":"Drawing %sW from battery","class":"discharging"}\n' "$WATTS" "$WATTS" ;;
+      Charging)
+        # Suppress 0W — happens when BIOS charge limit is reached
+        if [ "$WATTS" = "0" ]; then
+          printf '{"text":"","tooltip":"Plugged in (charge limit reached)","class":"full"}\n'
+        else
+          printf '{"text":"+%sW","tooltip":"Charging at %sW","class":"charging"}\n' "$WATTS" "$WATTS"
+        fi ;;
+      Full|"Not charging")
+        printf '{"text":"","tooltip":"Battery full","class":"full"}\n' ;;
+      *)
+        printf '{"text":"","tooltip":"%s","class":""}\n' "$STATUS" ;;
+    esac
+  '';
+
+  # AC plug/unplug notification daemon
+  acMonitorScript = pkgs.writeShellScript "ac-monitor" ''
+    ${pkgs.upower}/bin/upower --monitor | while IFS= read -r line; do
+      if echo "$line" | grep -q "line_power"; then
+        sleep 0.5
+        AC_PATH=$(grep -rl "Mains" /sys/class/power_supply/*/type 2>/dev/null | head -1 | xargs -I{} dirname {})
+        ONLINE=$(cat "$AC_PATH/online" 2>/dev/null || echo "?")
+        if [ "$ONLINE" = "1" ]; then
+          ${pkgs.libnotify}/bin/notify-send -u low -t 3000 "󰚥 AC Connected" "Plugged in"
+        elif [ "$ONLINE" = "0" ]; then
+          ${pkgs.libnotify}/bin/notify-send -u low -t 3000 "󰁾 AC Disconnected" "Running on battery"
+        fi
+      fi
+    done
+  '';
+
+  # Low battery warning + auto-hibernate at 5%
+  batteryMonitorScript = pkgs.writeShellScript "battery-monitor" ''
+    CAPACITY=$(cat /sys/class/power_supply/BAT1/capacity 2>/dev/null || echo 100)
+    STATUS=$(cat /sys/class/power_supply/BAT1/status 2>/dev/null || echo "Unknown")
+    STATE_FILE="''${XDG_RUNTIME_DIR:-/tmp}/battery-notified"
+
+    [ "$STATUS" != "Discharging" ] && { rm -f "$STATE_FILE"; exit 0; }
+
+    LAST=$(cat "$STATE_FILE" 2>/dev/null || echo 100)
+
+    if   [ "$CAPACITY" -le 5  ] && [ "$LAST" -gt 5  ]; then
+      ${pkgs.libnotify}/bin/notify-send -u critical -t 0 "󰁺 Battery Critical" "At ''${CAPACITY}% — hibernating in 30s"
+      echo 5 > "$STATE_FILE"
+      sleep 30
+      systemctl hibernate
+    elif [ "$CAPACITY" -le 10 ] && [ "$LAST" -gt 10 ]; then
+      ${pkgs.libnotify}/bin/notify-send -u critical -t 0 "󰁻 Battery Low" "At ''${CAPACITY}% — please plug in"
+      echo 10 > "$STATE_FILE"
+    elif [ "$CAPACITY" -le 20 ] && [ "$LAST" -gt 20 ]; then
+      ${pkgs.libnotify}/bin/notify-send -u normal -t 8000 "󰁼 Battery Warning" "At ''${CAPACITY}%"
+      echo 20 > "$STATE_FILE"
+    fi
   '';
 
 in
@@ -184,6 +259,9 @@ SCRIPT
     # System info
     fastfetch
     btop
+    upower     # battery info (upower -i $(upower -e | grep bat))
+    powerstat  # real-time per-process power consumption
+    acpi       # quick battery/AC status
 
     # Audio mixer
     pulsemixer
@@ -216,6 +294,9 @@ SCRIPT
     khal
     vdirsyncer
 
+    # LaTeX
+    texliveMedium
+
     # Utilities
     ripgrep
     fd
@@ -230,10 +311,17 @@ SCRIPT
       numpy
       pandas
       matplotlib
+      torchvision
     ]))
 
     # Misc
     xdg-utils
+
+    # Camera (webcam viewer / v4l2 tools for OBS)
+    v4l-utils
+
+    # Music
+    spotify
   ]) ++ [
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
   ];
@@ -419,6 +507,17 @@ SCRIPT
     };
   };
 
+  # ─── OBS Studio ───────────────────────────────────────────────────────────────
+  programs.obs-studio = {
+    enable = true;
+    plugins = with pkgs.obs-studio-plugins; [
+      wlrobs              # Wayland screen capture (pipewire/wlroots)
+      obs-pipewire-audio-capture # per-app audio capture via PipeWire
+      obs-backgroundremoval   # virtual background / chroma key alternative
+      obs-gstreamer       # GStreamer video/audio source support
+    ];
+  };
+
   # ─── Git ──────────────────────────────────────────────────────────────────────
   programs.git = {
     enable = true;
@@ -437,6 +536,7 @@ SCRIPT
       rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#$(hostname)";
       update  = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake .#$(hostname)";
       scpget  = "termscp";
+      battery = "upower -i $(upower -e | grep -i bat | head -1)";
     };
   };
 
@@ -484,7 +584,8 @@ SCRIPT
         };
 
         clock = {
-          format     = " {:%H:%M}";
+          interval   = 1;
+          format     = " {:%H:%M:%S}";
           format-alt = " {:%a, %d %b %Y}";
           on-click-right = "kitty --hold --class floating-calendar --title Calendar -e khal interactive";
           tooltip = false;
@@ -535,7 +636,14 @@ SCRIPT
           format-charging = "󰂄 {capacity}%";
           format-plugged  = "󰚥 {capacity}%";
           format-icons    = [ "󰁺" "󰁻" "󰁼" "󰁽" "󰁾" "󰁿" "󰂀" "󰂁" "󰂂" "󰁹" ];
-          tooltip-format  = "Battery: {capacity}%\nTime remaining: {time}";
+          tooltip-format  = "Battery: {capacity}%\nPower: {power}W\nTime remaining: {time}";
+        };
+
+        "custom/power-draw" = {
+          interval = 5;
+          return-type = "json";
+          exec = "${powerDrawScript}";
+          format = "{}";
         };
 
         network = {
@@ -647,7 +755,7 @@ SCRIPT
         modules-right  = [
           "custom/media"
           "cpu" "memory" "temperature"
-          "pulseaudio" "backlight" "battery"
+          "pulseaudio" "backlight" "battery" "custom/power-draw"
           "network" "custom/tailscale" "bluetooth" "power-profiles-daemon"
           "custom/notification" "tray" "custom/power"
         ];
@@ -670,7 +778,7 @@ SCRIPT
           modules-right = [
             "custom/media"
             "cpu" "memory" "temperature"
-            "pulseaudio" "custom/brightness" "battery"
+            "pulseaudio" "custom/brightness" "battery" "custom/power-draw"
             "network" "custom/tailscale" "bluetooth" "power-profiles-daemon"
             "custom/notification" "tray" "custom/power"
           ];
@@ -764,7 +872,6 @@ SCRIPT
       #cpu,
       #memory,
       #temperature,
-      #battery,
       #network,
       #pulseaudio,
       #backlight,
@@ -774,6 +881,10 @@ SCRIPT
       #custom-tailscale {
         padding: 0 10px;
       }
+
+      /* battery + power-draw are one visual unit — no gap between them */
+      #battery          { padding: 0 2px 0 10px; }
+      #custom-power-draw { padding: 0 10px 0 2px; }
 
       /* ── Module accent colours ── */
       #custom-media        { color: #50fa7b; }
@@ -800,6 +911,10 @@ SCRIPT
       @keyframes blink {
         to { color: rgba(248, 248, 242, 0.7); }
       }
+
+      #custom-power-draw                { color: #ffb86c; }
+      #custom-power-draw.charging       { color: #50fa7b; }
+      #custom-power-draw.full           { color: #50fa7b; }
 
       #network             { color: #8be9fd; }
       #network.disconnected { color: #ff5555; }
@@ -883,10 +998,12 @@ SCRIPT
         font-size: 14px;
         padding: 0 10px;
       }
+      window#waybar:not(.eDP-1) #battery           { padding: 0 2px 0 8px; }
+      window#waybar:not(.eDP-1) #custom-power-draw  { padding: 0 8px 0 2px; }
+
       window#waybar:not(.eDP-1) #cpu,
       window#waybar:not(.eDP-1) #memory,
       window#waybar:not(.eDP-1) #temperature,
-      window#waybar:not(.eDP-1) #battery,
       window#waybar:not(.eDP-1) #network,
       window#waybar:not(.eDP-1) #pulseaudio,
       window#waybar:not(.eDP-1) #backlight,
@@ -1540,6 +1657,10 @@ SCRIPT
           on-timeout = "hyprctl dispatch dpms off";
           on-resume = "hyprctl dispatch dpms on";
         }
+        {
+          timeout = 1800; # 30 min — suspend-then-hibernate when idle
+          on-timeout = "systemctl suspend-then-hibernate";
+        }
       ];
     };
   };
@@ -1567,6 +1688,42 @@ SCRIPT
         ];
       }
     ];
+  };
+
+  # ─── Battery & power monitoring services ─────────────────────────────────────
+  systemd.user.services.ac-monitor = {
+    Unit = {
+      Description = "AC plug/unplug notifications";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${acMonitorScript}";
+      Restart = "always";
+      RestartSec = "5s";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  systemd.user.services.battery-monitor = {
+    Unit = {
+      Description = "Low battery warnings and auto-hibernate";
+      After = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${batteryMonitorScript}";
+    };
+  };
+
+  systemd.user.timers.battery-monitor = {
+    Unit.Description = "Battery monitor — runs every minute";
+    Timer = {
+      OnCalendar = "*:0/1";
+      Persistent = true;
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   # ─── GTK ──────────────────────────────────────────────────────────────────────

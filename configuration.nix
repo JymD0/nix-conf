@@ -1,5 +1,19 @@
 { config, pkgs, lib, zen-browser, ... }:
 
+let
+  eppOnBattery = pkgs.writeShellScript "epp-on-battery" ''
+    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+      echo power > "$f"
+    done
+  '';
+  eppOnAC = pkgs.writeShellScript "epp-on-ac" ''
+    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+      echo balanced_performance > "$f"
+    done
+  '';
+
+in
+
 {
   imports = [ ./hardware-configuration.nix ];
 
@@ -16,18 +30,30 @@
 
   # Framework-specific tweaks
   boot.kernelParams = [
-    "amdgpu.abmlevel=0" # Better color accuracy
+    "amdgpu.abmlevel=0"      # Better color accuracy
+    "amd_pstate=active"      # AMD P-State EPP — more efficient CPU power management
+    "mem_sleep_default=deep" # S3 deep sleep — much lower suspend power draw
+    # Hibernate resume — offset found via: filefrag -v /swapfile | awk 'NR==4{print $4}' | tr -d '.'
+    "resume_offset=5408768"
   ];
+
+  boot.resumeDevice = "/dev/nvme0n1p5";
 
   # Prevent wake in backpack
   services.udev.extraRules = lib.mkAfter ''
     SUBSYSTEM=="usb", DRIVERS=="usb", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0012", ATTR{power/wakeup}="disabled"
     SUBSYSTEM=="usb", DRIVERS=="usb", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0014", ATTR{power/wakeup}="disabled"
+
+    # EPP: prefer efficiency on battery, balanced-performance on AC
+    SUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="${eppOnBattery}"
+    SUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="${eppOnAC}"
+
   '';
 
   # Hostname
   networking.hostName = "yourHostname";
   networking.networkmanager.enable = true;
+  networking.networkmanager.wifi.powersave = true;
 
   # Time zone & locale (English language, Austrian region)
   time.timeZone = "Europe/Vienna";
@@ -58,6 +84,20 @@
     alsa.enable = true;
     alsa.support32Bit = true;
     pulse.enable = true;
+    jack.enable = true; # needed by OBS audio
+  };
+
+  # Reduce microphone gain to prevent clipping/noise on Framework 16
+  # The default capture gain is too hot, causing noise floor to clip
+  services.pipewire.wireplumber.extraConfig."99-mic-gain" = {
+    "monitor.alsa.rules" = [
+      {
+        matches = [{ "node.name" = "~alsa_input.*"; }];
+        actions.update-props = {
+          "node.volume" = 0.6;
+        };
+      }
+    ];
   };
 
   # Bluetooth
@@ -78,6 +118,18 @@
 
   # Power management (critical for laptop battery life)
   services.power-profiles-daemon.enable = true;
+  powerManagement.powertop.enable = false; # disabled — conflicts with power-profiles-daemon and causes USB HID autosuspend lag
+
+  # Swapfile required for hibernate — must be >= RAM size (32 GB)
+  swapDevices = [{
+    device = "/swapfile";
+    size = 32768; # MB
+  }];
+
+  # Hibernate after 2h of suspend (requires swap >= RAM size)
+  systemd.sleep.settings.Sleep = {
+    HibernateDelaySec = "2h";
+  };
   # Firmware updates (Framework ships updates via fwupd)
   services.fwupd.enable = true;
 
@@ -104,7 +156,7 @@
   # Firewall
   networking.firewall = {
     enable = true;
-    trustedInterfaces = [ "tailscale0" ];
+    trustedInterfaces = [ "tailscale0" "docker0" ];
     allowedUDPPorts = [ config.services.tailscale.port ];
   };
 
@@ -116,6 +168,14 @@
 
   # Docker
   virtualisation.docker.enable = true;
+  virtualisation.docker.daemon.settings = {
+    dns = [ "8.8.8.8" "8.8.4.4" ];
+  };
+
+  # Route Docker bridge traffic via main table, bypassing Tailscale exit node
+  networking.localCommands = ''
+    ip rule add from 172.17.0.0/16 lookup main priority 100 2>/dev/null || true
+  '';
 
   # SSH agent
   programs.ssh.startAgent = true;
@@ -151,9 +211,18 @@
   xdg.portal = {
     enable = true;
     extraPortals = [
+      pkgs.xdg-desktop-portal-hyprland # Wayland screen capture (OBS, screenshare)
       pkgs.xdg-desktop-portal-gtk
     ];
   };
+
+  # Virtual camera support for OBS
+  boot.extraModulePackages = with config.boot.kernelPackages; [ v4l2loopback ];
+  boot.kernelModules = [ "v4l2loopback" ];
+  boot.extraModprobeConfig = ''
+    options v4l2loopback devices=1 video_nr=10 card_label="OBS Virtual Camera" exclusive_caps=1
+    options snd_hda_intel power_save=1
+  '';
 
   # Electron apps (VS Code, Discord, etc.) render natively on Wayland
   environment.sessionVariables.NIXOS_OZONE_WL = "1";
