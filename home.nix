@@ -1,4 +1,4 @@
-{ config, pkgs, lib, claude-code, ... }:
+{ config, pkgs, lib, user, claude-code, ... }:
 
 let
   # Smart brightness control: brightnessctl for internal (eDP-1), ddcutil for external monitors
@@ -53,10 +53,10 @@ let
       fuzzel --dmenu --prompt '⏻  ' --width 24 --lines 6 --no-icons)
     case "$choice" in
       *Lock*)        hyprlock ;;
-      *Suspend*)     systemctl suspend ;;
+      *Suspend*)     systemctl suspend-then-hibernate ;;
       *"Log out"*)   hyprctl dispatch exit 0 ;;
       *Hibernate*)
-        notify-send -u critical -i system-hibernate "Hibernating…" "Saving RAM to disk — do not close the lid"
+        notify-send -u critical -i system-hibernate "Hibernating…" "Saving RAM to disk"
         systemctl hibernate
         ;;
       *Reboot*)      systemctl reboot ;;
@@ -136,10 +136,170 @@ let
     fi
   '';
 
+  # ─── AI backend wrapper ───────────────────────────────────────────────────────
+  # Central script that all AI feature scripts call.
+  # Config: ~/.config/ai/config (URLs + models only, NO keys)
+  # Keys: stored in GNOME Keyring via secret-tool
+  # Usage:
+  #   ai "what is NixOS"
+  #   echo "text" | ai "summarize this"
+  #   ai --provider openrouter "hello"
+  #   ai --provider litellm --model claude-sonnet "hello"
+  aiScript = pkgs.writeShellScriptBin "ai" ''
+    set -euo pipefail
+
+    CONFIG="$HOME/.config/ai/config"
+    if [ ! -f "$CONFIG" ]; then
+      echo "Error: Missing $CONFIG" >&2
+      echo "" >&2
+      echo "Create it with:" >&2
+      echo "  mkdir -p ~/.config/ai" >&2
+      echo '  cat > ~/.config/ai/config << EOF' >&2
+      echo 'DEFAULT_PROVIDER=litellm' >&2
+      echo ''' >&2
+      echo 'LITELLM_URL=http://localhost:4000/v1' >&2
+      echo 'LITELLM_MODEL=claude-sonnet' >&2
+      echo ''' >&2
+      echo 'OPENROUTER_URL=https://openrouter.ai/api/v1' >&2
+      echo 'OPENROUTER_MODEL=anthropic/claude-sonnet' >&2
+      echo 'EOF' >&2
+      echo "" >&2
+      echo "Then store your API keys:" >&2
+      echo "  secret-tool store --label='''LiteLLM API Key''' service ai-backend provider litellm" >&2
+      echo "  secret-tool store --label='''OpenRouter API Key''' service ai-backend provider openrouter" >&2
+      exit 1
+    fi
+
+    source "$CONFIG"
+
+    PROVIDER="''${DEFAULT_PROVIDER:-litellm}"
+    MODEL=""
+    SYSTEM_PROMPT=""
+    PROMPT=""
+    MAX_TOKENS="2048"
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --provider) PROVIDER="$2"; shift 2 ;;
+        --model)    MODEL="$2"; shift 2 ;;
+        --system)   SYSTEM_PROMPT="$2"; shift 2 ;;
+        --max-tokens) MAX_TOKENS="$2"; shift 2 ;;
+        --raw)      RAW=1; shift ;;
+        --ask)      ASK=1; shift ;;
+        *)          PROMPT="$1"; shift ;;
+      esac
+    done
+
+    # Interactive mode: prompt via fuzzel (for keybind use)
+    if [ "''${ASK:-}" = "1" ] && [ -z "$PROMPT" ]; then
+      PROMPT=$(echo "" | ${pkgs.fuzzel}/bin/fuzzel --dmenu --prompt "  AI: " --width 50 --lines 0) || exit 0
+      [ -z "$PROMPT" ] && exit 0
+    fi
+
+    # Retrieve API key from GNOME Keyring
+    API_KEY=$(${pkgs.libsecret}/bin/secret-tool lookup service ai-backend provider "$PROVIDER" 2>/dev/null || true)
+    if [ -z "$API_KEY" ]; then
+      echo "Error: No API key found in keyring for provider '$PROVIDER'" >&2
+      echo "Store it with:" >&2
+      echo "  secret-tool store --label='$PROVIDER API Key' service ai-backend provider $PROVIDER" >&2
+      exit 1
+    fi
+
+    case "$PROVIDER" in
+      litellm)
+        API_URL="''${LITELLM_URL:-http://localhost:4000/v1}"
+        [ -z "$MODEL" ] && MODEL="''${LITELLM_MODEL:-claude-sonnet}"
+        ;;
+      openrouter)
+        API_URL="''${OPENROUTER_URL:-https://openrouter.ai/api/v1}"
+        [ -z "$MODEL" ] && MODEL="''${OPENROUTER_MODEL:-anthropic/claude-sonnet}"
+        ;;
+      *)
+        echo "Error: Unknown provider '$PROVIDER'. Use 'litellm' or 'openrouter'." >&2
+        exit 1
+        ;;
+    esac
+
+    STDIN_CONTENT=""
+    if [ ! -t 0 ]; then
+      STDIN_CONTENT=$(cat)
+    fi
+
+    if [ -z "$PROMPT" ] && [ -z "$STDIN_CONTENT" ]; then
+      echo "Usage: ai [--provider litellm|openrouter] [--model name] [--system prompt] \"prompt\"" >&2
+      echo "       echo \"text\" | ai \"prompt\"" >&2
+      exit 1
+    fi
+
+    USER_CONTENT=""
+    if [ -n "$STDIN_CONTENT" ] && [ -n "$PROMPT" ]; then
+      USER_CONTENT="$PROMPT\n\n$STDIN_CONTENT"
+    elif [ -n "$STDIN_CONTENT" ]; then
+      USER_CONTENT="$STDIN_CONTENT"
+    else
+      USER_CONTENT="$PROMPT"
+    fi
+
+    MESSAGES=""
+    if [ -n "$SYSTEM_PROMPT" ]; then
+      MESSAGES=$(${pkgs.jq}/bin/jq -nc \
+        --arg sys "$SYSTEM_PROMPT" \
+        --arg usr "$USER_CONTENT" \
+        '[{"role":"system","content":$sys},{"role":"user","content":$usr}]')
+    else
+      MESSAGES=$(${pkgs.jq}/bin/jq -nc \
+        --arg usr "$USER_CONTENT" \
+        '[{"role":"user","content":$usr}]')
+    fi
+
+    BODY=$(${pkgs.jq}/bin/jq -nc \
+      --arg model "$MODEL" \
+      --argjson msgs "$MESSAGES" \
+      --argjson max "$MAX_TOKENS" \
+      '{"model":$model,"messages":$msgs,"max_tokens":$max}')
+
+    RESPONSE=$(${pkgs.curl}/bin/curl -s \
+      "''${API_URL}/chat/completions" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $API_KEY" \
+      -d "$BODY")
+
+    ERROR=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.error.message // empty' 2>/dev/null)
+    if [ -n "$ERROR" ]; then
+      echo "API Error: $ERROR" >&2
+      exit 1
+    fi
+
+    if [ "''${RAW:-}" = "1" ]; then
+      echo "$RESPONSE"
+    else
+      echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.choices[0].message.content // "No response"'
+    fi
+  '';
+
+  # Listen for Hyprland monitor-added events and re-apply wallpaper
+  monitorWallpaperScript = pkgs.writeShellScript "monitor-wallpaper-sync" ''
+    ${pkgs.socat}/bin/socat -U - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock" |
+      while IFS= read -r line; do
+        case "$line" in
+          monitoraddedv2*)
+            sleep 1
+            WP="$HOME/.current-wallpaper"
+            if [ -L "$WP" ]; then
+              ${pkgs.swww}/bin/swww img "$(readlink -f "$WP")" \
+                --transition-type fade \
+                --transition-duration 1 \
+                --transition-fps 60
+            fi
+            ;;
+        esac
+      done
+  '';
+
 in
 {
-  home.username = "yourUsername";
-  home.homeDirectory = "/home/yourUsername";
+  home.username = user.username;
+  home.homeDirectory = "/home/${user.username}";
   home.stateVersion = "24.11";
 
   # Let Home Manager manage itself
@@ -241,6 +401,8 @@ SCRIPT
 
     # Notifications (libnotify needed by various apps)
     libnotify
+    sound-theme-freedesktop  # standard notification sounds
+    libcanberra-gtk3         # canberra-gtk-play for playing event sounds
 
     # Bluetooth & network (needed by Waybar on-click actions)
     blueman
@@ -272,6 +434,8 @@ SCRIPT
     # Apps
     discord
     pinta
+    vlc
+    thunderbird
 
     # Fonts
     noto-fonts-color-emoji
@@ -284,7 +448,8 @@ SCRIPT
 
     # SSH & File Transfer
     termscp
-    sshpass
+    seahorse  # GUI for managing GNOME Keyring (SSH keys, passwords, certificates)
+    libsecret # CLI (secret-tool) for keyring access — used by ai script
 
     # Wallpaper
     swww
@@ -324,6 +489,7 @@ SCRIPT
     spotify
   ]) ++ [
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
+    aiScript
   ];
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
@@ -363,29 +529,56 @@ SCRIPT
 
     configFile = {
       # ─── khal calendar config ─────────────────────────────────────────────────
-      "khal/config".text = ''
+      "khal/config".text = let
+        extraCalSections = lib.concatStrings (lib.mapAttrsToList (name: cal: ''
+
+          [[${builtins.replaceStrings ["-"] ["_"] name}]]
+          path = ~/.local/share/vdirsyncer/${name}/
+          type = calendar
+          color = ${cal.color}
+        '') user.extraCalendars);
+      in ''
         [calendars]
 
         [[personal]]
         path = ~/.local/share/vdirsyncer/calendar/*
         type = discover
         color = light magenta
-
+        ${extraCalSections}
         [locale]
         timeformat = %H:%M
         dateformat = %d.%m.%Y
         longdateformat = %d.%m.%Y
         datetimeformat = %d.%m.%Y %H:%M
         longdatetimeformat = %d.%m.%Y %H:%M
-        default_timezone = Europe/Vienna
+        default_timezone = ${user.timezone}
         firstweekday = 0
 
         [default]
-        default_calendar = personal
+        default_calendar = ${user.defaultCalendar}
       '';
 
       # ─── vdirsyncer config ────────────────────────────────────────────────────
-      "vdirsyncer/config".text = ''
+      "vdirsyncer/config".text = let
+        extraCalPairs = lib.concatStrings (lib.mapAttrsToList (name: cal: let
+          safeName = builtins.replaceStrings ["-"] ["_"] name;
+        in ''
+
+          [pair ${safeName}]
+          a = "${safeName}_local"
+          b = "${safeName}_remote"
+          collections = null
+
+          [storage ${safeName}_local]
+          type = "filesystem"
+          path = "~/.local/share/vdirsyncer/${name}/"
+          fileext = ".ics"
+
+          [storage ${safeName}_remote]
+          type = "http"
+          url.fetch = ["command", "${pkgs.libsecret}/bin/secret-tool", "lookup", "service", "vdirsyncer-ical", "attribute", "${cal.keyringAttr}"]
+        '') user.extraCalendars);
+      in ''
         [general]
         status_path = "~/.local/share/vdirsyncer/status/"
 
@@ -403,8 +596,9 @@ SCRIPT
         [storage personal_calendar_remote]
         type = "google_calendar"
         token_file = "~/.local/share/vdirsyncer/google_token"
-        client_id = ""
-        client_secret = ""
+        client_id.fetch = ["command", "${pkgs.libsecret}/bin/secret-tool", "lookup", "service", "vdirsyncer", "attribute", "client_id"]
+        client_secret.fetch = ["command", "${pkgs.libsecret}/bin/secret-tool", "lookup", "service", "vdirsyncer", "attribute", "client_secret"]
+        ${extraCalPairs}
       '';
     };
   };
@@ -417,13 +611,16 @@ SCRIPT
       size = 12;
     };
     settings = {
-      background_opacity = "0.95";
+      shell = "zsh";
+      background_opacity = "0.85";
       window_padding_width = 8;
       tab_bar_style = "powerline";
       tab_bar_edge = "top";
+      tab_bar_min_tabs = 2;
       copy_on_select = true;
       enable_audio_bell = false;
       confirm_os_window_close = 0;
+      placement_strategy = "top-left";
       repaint_delay = 10;
       input_delay = 3;
       sync_to_monitor = true;
@@ -501,7 +698,7 @@ SCRIPT
         "editor.minimap.enabled"            = false;
         "files.autoSave"                    = "afterDelay";
         "terminal.integrated.fontSize"      = 13;
-        "terminal.integrated.defaultProfile.linux" = "bash";
+        "terminal.integrated.defaultProfile.linux" = "zsh";
         "git.autofetch"                     = true;
       };
     };
@@ -523,44 +720,319 @@ SCRIPT
     enable = true;
     settings = {
       user = {
-        name  = "Your Name";
-        email = "your.email@example.com";
+        name  = user.fullName;
+        email = user.email;
       };
     };
   };
 
-  # ─── Bash ─────────────────────────────────────────────────────────────────────
-  programs.bash = {
+  # ─── SSH ──────────────────────────────────────────────────────────────────────
+  programs.ssh = {
     enable = true;
+    enableDefaultConfig = false;
+
+    matchBlocks = {
+      "*" = {
+        addKeysToAgent = "yes"; # auto-add keys to agent on first use
+        controlMaster = "auto"; # reuse connections — instant subsequent logins
+        controlPath = "~/.ssh/sockets/%r@%h-%p";
+        controlPersist = "10m"; # keep idle connections alive 10 min
+      };
+    } // user.sshHosts;
+  };
+
+  # ─── Bash ─────────────────────────────────────────────────────────────────────
+  programs.bash.enable = true;   # keep as fallback
+
+  programs.zsh = {
+    enable = true;
+    dotDir = "${config.xdg.configHome}/zsh";
+    autosuggestion.enable = true;
+    syntaxHighlighting = {
+      enable = true;
+      styles = {
+        # Dracula-themed syntax highlighting
+        "main"                      = "fg=#f8f8f2";
+        "default"                   = "fg=#f8f8f2";
+        "unknown-token"             = "fg=#ff5555";
+        "reserved-word"             = "fg=#ff79c6,bold";
+        "alias"                     = "fg=#50fa7b";
+        "builtin"                   = "fg=#8be9fd";
+        "function"                  = "fg=#50fa7b";
+        "command"                   = "fg=#50fa7b";
+        "precommand"                = "fg=#50fa7b,underline";
+        "commandseparator"          = "fg=#ff79c6";
+        "path"                      = "fg=#f1fa8c";
+        "globbing"                  = "fg=#f1fa8c";
+        "single-hyphen-option"      = "fg=#ffb86c";
+        "double-hyphen-option"      = "fg=#ffb86c";
+        "single-quoted-argument"    = "fg=#f1fa8c";
+        "double-quoted-argument"    = "fg=#f1fa8c";
+        "dollar-quoted-argument"    = "fg=#f1fa8c";
+        "back-quoted-argument"      = "fg=#bd93f9";
+        "assign"                    = "fg=#f8f8f2";
+        "redirection"               = "fg=#ff79c6";
+        "comment"                   = "fg=#6272a4";
+      };
+    };
+    historySubstringSearch.enable = true;
+    enableCompletion = true;
+    history = {
+      size = 50000;
+      save = 50000;
+      ignoreDups = true;
+      ignoreAllDups = true;
+      ignoreSpace = true;
+      extended = true;        # timestamps in history
+      share = true;           # share history across sessions
+    };
     shellAliases = {
       rebuild = "sudo nixos-rebuild switch --flake /etc/nixos#$(hostname)";
       update  = "cd /etc/nixos && sudo nix flake update && sudo nixos-rebuild switch --flake .#$(hostname)";
       scpget  = "termscp";
       battery = "upower -i $(upower -e | grep -i bat | head -1)";
+      ll      = "eza -la";
+      la      = "eza -a";
+      lt      = "eza --tree --level=2";
+      cat     = "bat";
+      ssh     = "kitten ssh";
+      gs      = "git status";
+      gd      = "git diff";
+      gl      = "git log --oneline --graph -20";
+
+      # Quick helpers
+      mkcd    = "(){mkdir -p \"$1\" && cd \"$1\";}";
+      ".."    = "cd ..";
+      "..."   = "cd ../..";
+      "...."  = "cd ../../..";
     };
+    initContent = ''
+      # ── Completion styling ──────────────────────────────────────────────
+      # Case-insensitive, then partial-word, then substring matching
+      zstyle ':completion:*' matcher-list \
+        'm:{a-zA-Z}={A-Za-z}' \
+        'r:|[._-]=* r:|=*' \
+        'l:|=* r:|=*'
+      # Completion menu with selection
+      zstyle ':completion:*' menu select
+      # Colored completion list
+      zstyle ':completion:*' list-colors "''${(s.:.)LS_COLORS}"
+      # Group completions by category with headers
+      zstyle ':completion:*' group-name '''
+      zstyle ':completion:*:descriptions' format '%F{#bd93f9}── %d ──%f'
+      zstyle ':completion:*:warnings' format '%F{#ff5555}no matches%f'
+      # Show command descriptions in completion
+      zstyle ':completion:*' verbose yes
+      # Nicer process completion
+      zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#)*=0=01;31'
+
+      # ── History substring search keybinds ───────────────────────────────
+      bindkey '^[[A' history-substring-search-up
+      bindkey '^[[B' history-substring-search-down
+
+      # ── Auto-notify for long-running commands ──────────────────────────
+      __cmd_start_time=
+      __cmd_name=
+      preexec() {
+        __cmd_start_time=$EPOCHSECONDS
+        __cmd_name="$1"
+      }
+      precmd() {
+        local elapsed=$(( EPOCHSECONDS - ''${__cmd_start_time:-$EPOCHSECONDS} ))
+        if (( elapsed >= 10 )) && [[ -n "$__cmd_name" ]]; then
+          notify-send -a "Terminal" "Command finished" \
+            "\"$__cmd_name\" took ''${elapsed}s"
+        fi
+        __cmd_start_time=
+        __cmd_name=
+      }
+
+      # ── Universal extract function ─────────────────────────────────────
+      extract() {
+        if [[ -f "$1" ]]; then
+          case "$1" in
+            *.tar.bz2) tar xjf "$1" ;;
+            *.tar.gz)  tar xzf "$1" ;;
+            *.tar.xz)  tar xJf "$1" ;;
+            *.tar.zst) tar --zstd -xf "$1" ;;
+            *.bz2)     bunzip2 "$1" ;;
+            *.gz)      gunzip "$1" ;;
+            *.tar)     tar xf "$1" ;;
+            *.tbz2)    tar xjf "$1" ;;
+            *.tgz)     tar xzf "$1" ;;
+            *.zip)     unzip "$1" ;;
+            *.7z)      7z x "$1" ;;
+            *.rar)     unrar x "$1" ;;
+            *.xz)      unxz "$1" ;;
+            *.zst)     unzstd "$1" ;;
+            *)         echo "Cannot extract '$1'" ;;
+          esac
+        else
+          echo "'$1' is not a valid file"
+        fi
+      }
+    '';
   };
 
   programs.starship = {
     enable = true;
     settings = {
-      format = "$all";
+      add_newline = false;
+      format = lib.concatStrings [
+        "[╭─](dimmed purple)"
+        "$os"
+        "$directory"
+        "$git_branch"
+        "$git_status"
+        "$git_metrics"
+        "$fill"
+        "$nix_shell"
+        "$python"
+        "$nodejs"
+        "$rust"
+        "$cmd_duration"
+        "$line_break"
+        "[╰─](dimmed purple)"
+        "$character"
+      ];
       palette = "dracula";
       palettes.dracula = {
-        purple = "#bd93f9";
-        cyan   = "#8be9fd";
-        green  = "#50fa7b";
-        red    = "#ff5555";
-        yellow = "#f1fa8c";
-        pink   = "#ff79c6";
-        orange = "#ffb86c";
+        background = "#282a36";
+        foreground = "#f8f8f2";
+        purple     = "#bd93f9";
+        cyan       = "#8be9fd";
+        green      = "#50fa7b";
+        red        = "#ff5555";
+        yellow     = "#f1fa8c";
+        pink       = "#ff79c6";
+        orange     = "#ffb86c";
+        comment    = "#6272a4";
       };
+      os = {
+        disabled = false;
+        style = "bold purple";
+        symbols.NixOS = " ";
+      };
+      fill.symbol = " ";
       character = {
-        success_symbol = "[>](bold green)";
-        error_symbol   = "[>](bold red)";
+        success_symbol = "[󰁔](bold purple)";
+        error_symbol   = "[󰁔](bold red)";
+        vimcmd_symbol  = "[󰁍](bold green)";
       };
-      directory.style = "bold cyan";
-      git_branch.style = "bold purple";
+      directory = {
+        style = "bold cyan";
+        read_only = " 󰌾";
+        read_only_style = "red";
+        truncation_length = 4;
+        truncation_symbol = "…/";
+        truncate_to_repo = true;
+        substitutions = {
+          Documents = "󰈙 Documents";
+          Downloads = " Downloads";
+          Music     = "󰝚 Music";
+          Pictures  = " Pictures";
+          Projects  = " Projects";
+        };
+      };
+      git_branch = {
+        symbol = " ";
+        style = "bold purple";
+        format = "on [$symbol$branch(:$remote_branch)]($style) ";
+        truncation_length = 24;
+      };
+      git_status = {
+        style = "bold pink";
+        format = "[$all_status$ahead_behind]($style)";
+        conflicted = " ";
+        ahead    = "⇡$\{count} ";
+        behind   = "⇣$\{count} ";
+        diverged = "⇕⇡$\{ahead_count}⇣$\{behind_count} ";
+        untracked = "? ";
+        stashed  = "📦 ";
+        modified = "! ";
+        staged   = "+ ";
+        renamed  = "» ";
+        deleted  = "✘ ";
+      };
+      git_metrics = {
+        disabled = false;
+        format = "[+$added]($added_style)/[-$deleted]($deleted_style) ";
+        added_style = "bold green";
+        deleted_style = "bold red";
+      };
+      nix_shell = {
+        format = "[$symbol$state( \\($name\\))]($style) ";
+        symbol = " ";
+        style = "bold cyan";
+        impure_msg = "[impure](bold orange)";
+        pure_msg = "[pure](bold green)";
+      };
+      python = {
+        symbol = "🐍 ";
+        style = "bold yellow";
+        format = "[$symbol$pyenv_prefix($version )(\\($virtualenv\\) )]($style)";
+      };
+      nodejs = {
+        symbol = " ";
+        style = "bold green";
+      };
+      rust = {
+        symbol = "🦀 ";
+        style = "bold orange";
+      };
+      cmd_duration = {
+        min_time = 2000;
+        style = "bold yellow";
+        format = "⏱ [$duration]($style) ";
+        show_milliseconds = false;
+        show_notifications = false;
+      };
     };
+  };
+
+  # ─── Eza (ls replacement) ──────────────────────────────────────────────────────
+  programs.eza = {
+    enable = true;
+    icons = "auto";
+    git = true;
+    extraOptions = [ "--group-directories-first" ];
+  };
+
+  # ─── Zoxide (smarter cd) ─────────────────────────────────────────────────────
+  programs.zoxide = {
+    enable = true;
+    enableZshIntegration = true;
+  };
+
+  # ─── Fzf (fuzzy finder) ─────────────────────────────────────────────────────
+  programs.fzf = {
+    enable = true;
+    enableZshIntegration = true;
+    defaultOptions = [
+      "--color=fg:#f8f8f2,bg:#282a36,hl:#bd93f9"
+      "--color=fg+:#f8f8f2,bg+:#44475a,hl+:#bd93f9"
+      "--color=info:#ffb86c,prompt:#50fa7b,pointer:#ff79c6"
+      "--color=marker:#ff79c6,spinner:#ffb86c,header:#6272a4"
+    ];
+    defaultCommand = "fd --type f --hidden --exclude .git";
+    fileWidgetCommand = "fd --type f --hidden --exclude .git";
+    changeDirWidgetCommand = "fd --type d --hidden --exclude .git";
+  };
+
+  # ─── Bat (cat replacement) ──────────────────────────────────────────────────
+  programs.bat = {
+    enable = true;
+    config = {
+      theme = "Dracula";
+      style = "numbers,changes";
+    };
+  };
+
+  # ─── Yazi (terminal file manager) ───────────────────────────────────────────
+  programs.yazi = {
+    enable = true;
+    enableZshIntegration = true;
+    shellWrapperName = "y";
   };
 
   # ─── Waybar ───────────────────────────────────────────────────────────────────
@@ -1032,14 +1504,19 @@ SCRIPT
 
       exec-once = [
         "hyprlock"
+        "mkdir -p ~/.ssh/sockets" # for SSH ControlMaster multiplexing
+        "gnome-keyring-daemon --start --components=secrets,ssh"
         "swww-daemon"
         "variety"
         "waybar"
         "wl-paste --type text --watch cliphist store"
         "wl-paste --type image --watch cliphist store"
+        # Re-apply wallpaper when a monitor is added (swww doesn't auto-sync new outputs)
+        "${monitorWallpaperScript}"
       ];
 
       env = [
+        "SSH_AUTH_SOCK,$XDG_RUNTIME_DIR/keyring/ssh" # GNOME Keyring SSH agent socket
         "XCURSOR_SIZE,24"
         "HYPRCURSOR_SIZE,24"
         "TERMINAL,kitty"
@@ -1048,7 +1525,7 @@ SCRIPT
       ];
 
       input = {
-        kb_layout = "de";
+        kb_layout = user.keyboardLayout;
         kb_variant = "";
         follow_mouse = 1;
         sensitivity = 0;
@@ -1076,8 +1553,10 @@ SCRIPT
         rounding = 8;
         blur = {
           enabled = true;
-          size    = 3;
-          passes  = 1;
+          size    = 8;
+          passes  = 3;
+          new_optimizations = true;
+          xray = false;
         };
         shadow = {
           enabled = true;
@@ -1095,6 +1574,7 @@ SCRIPT
           "border, 1, 10, default"
           "fade, 1, 7, default"
           "workspaces, 1, 6, default"
+          "specialWorkspace, 1, 6, default, slidevert"
           "layersIn, 1, 5, default, fade"
           "layersOut, 1, 5, default, fade"
         ];
@@ -1119,6 +1599,12 @@ SCRIPT
         "float on, match:class ^(com.gabm.satty)$"
         "size 60% 70%, match:class ^(com.gabm.satty)$"
         "center on, match:class ^(com.gabm.satty)$"
+
+        # Scratchpad terminal — slides up from bottom
+        "float on, match:class ^(scratchpad)$"
+        "size 80% 60%, match:class ^(scratchpad)$"
+        "center on, match:class ^(scratchpad)$"
+        "workspace special:scratchpad, match:class ^(scratchpad)$"
       ];
 
       layerrules = [
@@ -1160,6 +1646,9 @@ SCRIPT
         "$mod, TAB, workspace, previous"
         "$mod, G, togglespecialworkspace, magic"
         "$mod SHIFT, G, movetoworkspace, special:magic"
+
+        # Scratchpad terminal — toggle with Super+- (respawn if closed)
+        "$mod, minus, exec, bash -c 'if hyprctl clients -j | jq -e \".[].class\" | grep -q scratchpad; then hyprctl dispatch togglespecialworkspace scratchpad; else kitty --class scratchpad; fi'"
 
         "$mod, L, exec, hyprlock"
         "$mod SHIFT, V, centerwindow,"
@@ -1319,6 +1808,14 @@ SCRIPT
       hide-on-clear = true;
       hide-on-action = true;
 
+      scripts = {
+        "notification-sound" = {
+          exec = "canberra-gtk-play -i message-new-instant -d notification";
+          app-name = ".*";
+          run-on = "receive";
+        };
+      };
+
       widgets = [
         "title"
         "dnd"
@@ -1426,17 +1923,15 @@ SCRIPT
         border-color: @current;
       }
 
-      /* ── Close button ── */
+      /* ── Close button (hidden on popups) ── */
       .close-button {
-        background: @current;
-        color: @fg;
-        border-radius: 6px;
-        padding: 2px 6px;
-        margin: 6px;
+        background: transparent;
+        color: transparent;
+        min-width: 0;
+        min-height: 0;
+        padding: 0;
+        margin: 0;
         border: none;
-      }
-      .close-button:hover {
-        background: @red;
       }
 
       /* ── Notification actions ── */
@@ -1640,13 +2135,13 @@ SCRIPT
       general = {
         lock_cmd = "pidof hyprlock || hyprlock";
         before_sleep_cmd = "loginctl lock-session";
-        after_sleep_cmd = "hyprctl dispatch dpms on";
+        after_sleep_cmd = "hyprctl dispatch dpms on; hyprctl setcursor Bibata-Modern-Classic 24";
       };
       listener = [
         {
           timeout = 300;
           on-timeout = "brightnessctl -s set 30%";
-          on-resume = "brightnessctl -r";
+          on-resume = "brightnessctl -r || brightnessctl set 100%";
         }
         {
           timeout = 600;
@@ -1686,6 +2181,7 @@ SCRIPT
           { criteria = "*";     status = "enable"; }
           { criteria = "eDP-1"; status = "enable"; }
         ];
+        profile.exec = [ "sleep 1 && [ -L \"$HOME/.current-wallpaper\" ] && swww img \"$(readlink -f \"$HOME/.current-wallpaper\")\" --transition-type fade --transition-duration 1 --transition-fps 60" ];
       }
     ];
   };
@@ -1724,6 +2220,35 @@ SCRIPT
       Persistent = true;
     };
     Install.WantedBy = [ "timers.target" ];
+  };
+
+  # ─── MetaMCP proxy service ──────────────────────────────────────────────────
+  systemd.user.services.metamcp-proxy = {
+    Unit = {
+      Description = "MetaMCP sanitizing proxy";
+      After = [ "network-online.target" "gnome-keyring-daemon.service" ];
+      Wants = [ "gnome-keyring-daemon.service" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${pkgs.nodejs}/bin/node /home/${user.username}/Projects/mcp/metamcp-proxy.mjs";
+      Restart = "always";
+      RestartSec = "10s";
+      Environment = [
+        "PORT=12100"
+        "METAMCP_URL=${user.metamcpUrl}"
+      ];
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
+  # ─── Claude Code MCP config ──────────────────────────────────────────────────
+  home.file.".claude/.mcp.json".force = true;
+  home.file.".claude/.mcp.json".text = builtins.toJSON {
+    mcpServers.metamcp = {
+      type = "http";
+      url = "http://localhost:12100/mcp";
+    };
   };
 
   # ─── GTK ──────────────────────────────────────────────────────────────────────

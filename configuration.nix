@@ -1,4 +1,4 @@
-{ config, pkgs, lib, zen-browser, ... }:
+{ config, pkgs, lib, user, zen-browser, ... }:
 
 let
   eppOnBattery = pkgs.writeShellScript "epp-on-battery" ''
@@ -51,31 +51,31 @@ in
   '';
 
   # Hostname
-  networking.hostName = "yourHostname";
+  networking.hostName = user.hostname;
   networking.networkmanager.enable = true;
-  networking.networkmanager.wifi.powersave = true;
+  networking.networkmanager.wifi.powersave = false; # disabled — causes reconnect failures after suspend on MT7922
 
   # Time zone & locale (English language, Austrian region)
-  time.timeZone = "Europe/Vienna";
+  time.timeZone = user.timezone;
   i18n.defaultLocale = "en_US.UTF-8";
   i18n.extraLocaleSettings = {
-    LC_ADDRESS = "de_AT.UTF-8";
-    LC_IDENTIFICATION = "de_AT.UTF-8";
-    LC_MEASUREMENT = "de_AT.UTF-8";
-    LC_MONETARY = "de_AT.UTF-8";
-    LC_NAME = "de_AT.UTF-8";
-    LC_NUMERIC = "de_AT.UTF-8";
-    LC_PAPER = "de_AT.UTF-8";
-    LC_TELEPHONE = "de_AT.UTF-8";
-    LC_TIME = "de_AT.UTF-8";
+    LC_ADDRESS = user.locale;
+    LC_IDENTIFICATION = user.locale;
+    LC_MEASUREMENT = user.locale;
+    LC_MONETARY = user.locale;
+    LC_NAME = user.locale;
+    LC_NUMERIC = user.locale;
+    LC_PAPER = user.locale;
+    LC_TELEPHONE = user.locale;
+    LC_TIME = user.locale;
   };
 
   # Keyboard layout (system-wide, German)
   services.xserver.xkb = {
-    layout = "de";
+    layout = user.keyboardLayout;
     variant = "";
   };
-  console.keyMap = "de";
+  console.keyMap = user.keyboardLayout;
 
   # Audio
   security.rtkit.enable = true;
@@ -88,16 +88,37 @@ in
   };
 
   # Reduce microphone gain to prevent clipping/noise on Framework 16
-  # The default capture gain is too hot, causing noise floor to clip
+  # ALC295 internal mic defaults to max boost (+30dB) and max capture (+29.5dB),
+  # which causes constant static and clipping. Lower both at the ALSA level.
   services.pipewire.wireplumber.extraConfig."99-mic-gain" = {
     "monitor.alsa.rules" = [
       {
         matches = [{ "node.name" = "~alsa_input.*"; }];
         actions.update-props = {
-          "node.volume" = 0.6;
+          "node.volume" = 0.4;
         };
       }
     ];
+  };
+
+  # Fix ALSA-level mic gain: reduce Mic Boost from +30dB to +10dB
+  # and Capture Volume from max (63) to 25 to eliminate static/clipping
+  systemd.services.fix-mic-gain = {
+    description = "Set sane ALSA mic gain for ALC295";
+    after = [ "sound.target" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = let
+        amixer = "${pkgs.alsa-utils}/bin/amixer";
+      in pkgs.writeShellScript "fix-mic-gain" ''
+        # Mic Boost: 1 out of 3 = +10dB (default 3 = +30dB)
+        ${amixer} -c 1 sset 'Mic Boost' 1
+        # Capture Volume: 25 out of 63 (~-11dB, default 63 = +29.5dB)
+        ${amixer} -c 1 sset 'Capture' 25
+      '';
+    };
   };
 
   # Bluetooth
@@ -126,9 +147,33 @@ in
     size = 32768; # MB
   }];
 
-  # Hibernate after 2h of suspend (requires swap >= RAM size)
+  # Hibernate after 30min of suspend (requires swap >= RAM size)
   systemd.sleep.settings.Sleep = {
-    HibernateDelaySec = "2h";
+    HibernateDelaySec = "30m";
+  };
+
+  # Lid switch: suspend-then-hibernate on battery, lock when plugged in
+  services.logind.settings.Login = {
+    HandleLidSwitch = "suspend-then-hibernate";
+    HandleLidSwitchExternalPower = "lock";
+  };
+
+  # Fix WiFi and touchpad not working after suspend/resume
+  # Framework 16 AMD: mt7921e (WiFi) and i2c_hid_acpi (touchpad) need
+  # to be reloaded after S3 resume to reinitialize properly.
+  systemd.services.post-resume-fix = {
+    description = "Reload WiFi and touchpad drivers after resume";
+    after = [ "suspend.target" "hibernate.target" "suspend-then-hibernate.target" ];
+    wantedBy = [ "suspend.target" "hibernate.target" "suspend-then-hibernate.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "post-resume-fix" ''
+        # Reload WiFi driver (MediaTek MT7922 / mt7921e)
+        ${pkgs.kmod}/bin/modprobe -r mt7921e && ${pkgs.kmod}/bin/modprobe mt7921e
+        # Reload touchpad driver (I2C HID)
+        ${pkgs.kmod}/bin/modprobe -r i2c_hid_acpi && ${pkgs.kmod}/bin/modprobe i2c_hid_acpi
+      '';
+    };
   };
   # Firmware updates (Framework ships updates via fwupd)
   services.fwupd.enable = true;
@@ -141,14 +186,14 @@ in
   };
 
   # Set keyboard layout for Hyprland (Wayland)
-  environment.sessionVariables.XKB_DEFAULT_LAYOUT = "de";
+  environment.sessionVariables.XKB_DEFAULT_LAYOUT = user.keyboardLayout;
 
   # Auto-login via greetd — hyprlock handles authentication on startup
   services.greetd = {
     enable = true;
     settings.default_session = {
       command = "start-hyprland";
-      user = "yourUsername";
+      user = user.username;
     };
   };
 
@@ -177,9 +222,10 @@ in
     ip rule add from 172.17.0.0/16 lookup main priority 100 2>/dev/null || true
   '';
 
-  # SSH agent
-  programs.ssh.startAgent = true;
-  programs.ssh.extraConfig = lib.mkForce "";
+  # SSH — GNOME Keyring acts as the SSH agent (auto-unlocks keys at login)
+  programs.ssh.startAgent = false; # disabled — gnome-keyring-daemon provides the agent
+  services.gnome.gnome-keyring.enable = true;
+  security.pam.services.greetd.enableGnomeKeyring = true; # unlock keyring on login
 
   # Enable flakes
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
@@ -201,10 +247,13 @@ in
   ];
 
   # User account
-  users.users.yourUsername = {
+  programs.zsh.enable = true;
+
+  users.users.${user.username} = {
     isNormalUser = true;
-    description = "Your Name";
-    extraGroups = [ "networkmanager" "wheel" "video" "audio" "i2c" "docker" ];
+    description = user.fullName;
+    shell = pkgs.zsh;
+    extraGroups = [ "networkmanager" "wheel" "video" "audio" "i2c" "docker" "dialout" ];
   };
 
   # XDG portals — required for screensharing and file pickers under Hyprland

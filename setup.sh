@@ -24,26 +24,21 @@ STATE_FILE="/tmp/nixos-setup-state"
 
 RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
 
-# ── Detect values already applied to /etc/nixos (non-placeholder only) ────────
+# ── Detect values already applied to /etc/nixos/user.nix ──────────────────────
 detect_current_values() {
-  local conf="/etc/nixos/configuration.nix"
-  local home="/etc/nixos/home.nix"
+  local user="/etc/nixos/user.nix"
   DETECTED_HOSTNAME="" DETECTED_USERNAME="" DETECTED_FULLNAME="" DETECTED_EMAIL=""
 
-  if [[ -f "$conf" ]]; then
-    local h u f
-    h=$(grep -oP 'networking\.hostName\s*=\s*"\K[^"]+' "$conf" 2>/dev/null || true)
-    u=$(grep -oP 'users\.users\.\K[a-z_][a-z0-9_-]+' "$conf" 2>/dev/null | head -1 || true)
-    f=$(grep -oP 'description\s*=\s*"\K[^"]+' "$conf" 2>/dev/null | head -1 || true)
-    [[ "$h" != "yourHostname" ]] && DETECTED_HOSTNAME="$h"
-    [[ "$u" != "yourUsername" ]] && DETECTED_USERNAME="$u"
-    [[ "$f" != "Your Name"   ]] && DETECTED_FULLNAME="$f"
-  fi
-
-  if [[ -f "$home" ]]; then
-    local e
-    e=$(grep -oP 'email\s*=\s*"\K[^"]+' "$home" 2>/dev/null | head -1 || true)
-    [[ "$e" != 'your.email@example.com' ]] && DETECTED_EMAIL="$e"
+  if [[ -f "$user" ]]; then
+    local h u f e
+    h=$(grep -oP 'hostname\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    u=$(grep -oP 'username\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    f=$(grep -oP 'fullName\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    e=$(grep -oP 'email\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    [[ "$h" != "yourHostname" ]]          && DETECTED_HOSTNAME="$h"
+    [[ "$u" != "yourUsername" ]]           && DETECTED_USERNAME="$u"
+    [[ "$f" != "Your Name"   ]]           && DETECTED_FULLNAME="$f"
+    [[ "$e" != "your.email@example.com" ]] && DETECTED_EMAIL="$e"
   fi
 }
 
@@ -61,7 +56,7 @@ header "Step 0: Fetch missing config files"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-for f in flake.nix configuration.nix home.nix; do
+for f in flake.nix configuration.nix home.nix user.nix; do
   if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
     log "$f not found locally, downloading ..."
     curl -fsSL "$RAW_BASE/$f" -o "$SCRIPT_DIR/$f" \
@@ -103,21 +98,15 @@ if [[ -z "${SETUP_HOSTNAME:-}" ]]; then
   detect_current_values
   if [[ -n "$DETECTED_HOSTNAME" && -n "$DETECTED_USERNAME" \
      && -n "$DETECTED_FULLNAME" && -n "$DETECTED_EMAIL" ]]; then
-    echo ""
-    log "Current values detected from /etc/nixos:"
-    echo "  Hostname : $DETECTED_HOSTNAME"
-    echo "  Username : $DETECTED_USERNAME"
-    echo "  Full name: $DETECTED_FULLNAME"
-    echo "  Email    : $DETECTED_EMAIL"
-    echo ""
-    read -rp "Use current values? [Y/n] " USE_CURRENT
-    if [[ ! "$USE_CURRENT" =~ ^[Nn]$ ]]; then
-      SETUP_HOSTNAME="$DETECTED_HOSTNAME"
-      SETUP_USERNAME="$DETECTED_USERNAME"
-      SETUP_FULLNAME="$DETECTED_FULLNAME"
-      SETUP_EMAIL="$DETECTED_EMAIL"
-      log "Using current values."
-    fi
+    SETUP_HOSTNAME="$DETECTED_HOSTNAME"
+    SETUP_USERNAME="$DETECTED_USERNAME"
+    SETUP_FULLNAME="$DETECTED_FULLNAME"
+    SETUP_EMAIL="$DETECTED_EMAIL"
+    log "Using existing values from /etc/nixos/user.nix:"
+    echo "  Hostname : $SETUP_HOSTNAME"
+    echo "  Username : $SETUP_USERNAME"
+    echo "  Full name: $SETUP_FULLNAME"
+    echo "  Email    : $SETUP_EMAIL"
   fi
 fi
 
@@ -188,33 +177,37 @@ if [[ "$SCRIPT_DIR" != "/etc/nixos" ]]; then
   cp "$SCRIPT_DIR/flake.nix"         /etc/nixos/flake.nix
   cp "$SCRIPT_DIR/configuration.nix" /etc/nixos/configuration.nix
   cp "$SCRIPT_DIR/home.nix"          /etc/nixos/home.nix
+  cp "$SCRIPT_DIR/user.nix"          /etc/nixos/user.nix
 else
   log "Already running from /etc/nixos, skipping copy."
 fi
 
 # ============================================================
-header "Step 3: Replace placeholders"
+header "Step 3: Write user.nix"
 # ============================================================
 
-log "Substituting placeholders in config files ..."
+log "Writing user-specific values to /etc/nixos/user.nix ..."
 
-sed -i \
-  -e "s/yourHostname/$SETUP_HOSTNAME/g" \
-  -e "s/yourUsername/$SETUP_USERNAME/g" \
-  /etc/nixos/flake.nix
+cat > /etc/nixos/user.nix <<EOF
+{
+  username = "$SETUP_USERNAME";
+  hostname = "$SETUP_HOSTNAME";
+  fullName = "$SETUP_FULLNAME";
+  email    = "$SETUP_EMAIL";
 
-sed -i \
-  -e "s/yourHostname/$SETUP_HOSTNAME/g" \
-  -e "s/yourUsername/$SETUP_USERNAME/g" \
-  /etc/nixos/configuration.nix
+  timezone       = "Europe/Vienna";
+  locale         = "de_AT.UTF-8";
+  keyboardLayout = "de";
 
-sed -i \
-  -e "s/yourUsername/$SETUP_USERNAME/g" \
-  -e "s/Your Name/$SETUP_FULLNAME/g" \
-  -e "s/your\.email@example\.com/$SETUP_EMAIL/g" \
-  /etc/nixos/home.nix
+  sshHosts = {};
 
-log "Placeholders replaced."
+  defaultCalendar = "$SETUP_EMAIL";
+
+  extraCalendars = {};
+}
+EOF
+
+log "user.nix written."
 
 # ============================================================
 header "Step 4: Generate hardware configuration"
@@ -327,7 +320,7 @@ echo ""
 echo -e "  1. ${BOLD}Reboot${NC}              \u2192 sudo reboot"
 echo -e "  2. ${BOLD}Authenticate Claude${NC} \u2192 claude login"
 echo -e "  3. ${BOLD}Copy SSH key${NC}        \u2192 ssh-copy-id <your-server>"
-echo -e "  4. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/home.nix (programs.ssh.matchBlocks)"
+echo -e "  4. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/user.nix (sshHosts)"
 echo -e "                         then run: rebuild"
 echo ""
 warn "hardware-configuration.nix is machine-specific and not committed to the repo."

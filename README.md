@@ -27,14 +27,19 @@ sudo git clone https://github.com/JymD0/nix-conf /etc/nixos
 sudo nixos-generate-config --show-hardware-config > /etc/nixos/hardware-configuration.nix
 ```
 
-### 3. Edit placeholders
-- `flake.nix` — replace `yourHostname` and `yourUsername`
-- `configuration.nix` — replace `yourHostname` and `yourUsername`
-- `home.nix` — replace `yourUsername`, git name/email, SSH hosts
+### 3. Edit user.nix
+All user-specific values (hostname, username, email, SSH hosts, calendars) live in a single file:
+```bash
+vim /etc/nixos/user.nix
+```
+Then prevent git from tracking your local changes:
+```bash
+git update-index --skip-worktree user.nix
+```
 
 ### 4. Apply
 ```bash
-sudo nixos-rebuild switch --flake /etc/nixos#yourHostname
+sudo nixos-rebuild switch --flake /etc/nixos#<your-hostname>
 ```
 
 ### 5. Install Claude Code (after rebuild)
@@ -79,6 +84,7 @@ ssh-copy-id your-server
 ```
 /etc/nixos/
 ├── flake.nix                  # Inputs and system definition
+├── user.nix                   # User-specific values (hostname, email, SSH hosts, calendars)
 ├── configuration.nix          # System-level config (hardware, services)
 ├── home.nix                   # User-level config (apps, dotfiles, keybinds)
 ├── hardware-configuration.nix # Auto-generated — not in repo

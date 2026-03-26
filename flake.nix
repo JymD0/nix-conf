@@ -22,10 +22,13 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, ... }: {
-    nixosConfigurations.yourHostname = nixpkgs.lib.nixosSystem {
+  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, ... }:
+  let
+    user = import ./user.nix;
+  in {
+    nixosConfigurations.${user.hostname} = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit zen-browser claude-code; };
+      specialArgs = { inherit user zen-browser claude-code; };
       modules = [
         # Framework 16 AMD hardware support
         nixos-hardware.nixosModules.framework-16-7040-amd
@@ -36,8 +39,8 @@
         {
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
-          home-manager.extraSpecialArgs = { inherit claude-code; };
-          home-manager.users.yourUsername = import ./home.nix;
+          home-manager.extraSpecialArgs = { inherit user claude-code; };
+          home-manager.users.${user.username} = import ./home.nix;
         }
       ];
     };
