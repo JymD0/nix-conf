@@ -1,6 +1,15 @@
 { pkgs, ... }:
 
 let
+  ledmatrix-pkg = pkgs.python3.pkgs.buildPythonApplication {
+    pname = "ledmatrix";
+    version = "0.1.0";
+    src = ../scripts/ledmatrix;
+    format = "pyproject";
+    nativeBuildInputs = [ pkgs.python3.pkgs.setuptools ];
+    doCheck = false;
+  };
+
   # Smart brightness control: brightnessctl for internal (eDP-1), ddcutil for external monitors
   brightnessScript = pkgs.writeShellScript "brightness-ctl" ''
     ACTION=$1
@@ -24,6 +33,8 @@ let
           ;;
         down) ${pkgs.swayosd}/bin/swayosd-client --brightness lower 2>/dev/null || true ;;
       esac
+      NEW_PCT=$(( $(${pkgs.brightnessctl}/bin/brightnessctl g) * 100 / $(${pkgs.brightnessctl}/bin/brightnessctl m) ))
+      ${ledmatrix-pkg}/bin/ledmatrix-bar "$NEW_PCT" &
     else
       CUR=$(${pkgs.ddcutil}/bin/ddcutil getvcp 10 --brief 2>/dev/null | awk '{print $4}')
       CUR=''${CUR:-50}
@@ -38,6 +49,7 @@ let
         down) NEW=$(( CUR - STEP < 0 ? 0 : CUR - STEP )) ;;
       esac
       ${pkgs.ddcutil}/bin/ddcutil setvcp 10 "$NEW" 2>/dev/null
+      ${ledmatrix-pkg}/bin/ledmatrix-bar "$NEW" &
     fi
 
   '';
@@ -189,17 +201,22 @@ let
     fi
   '';
 
-  # Toggle LED matrix sleep state
+  # Toggle LED matrix on/off by setting brightness to 0 or restoring saved value
   ledmatrixToggleScript = pkgs.writeShellScript "ledmatrix-toggle" ''
     DEV="/dev/ttyACM0"
     [ ! -e "$DEV" ] && exit 0
     STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-sleeping"
     if [ -f "$STATEFILE" ]; then
-      inputmodule-control --serial-dev "$DEV" led-matrix --sleeping false
+      SAVED=$(cat "$STATEFILE" 2>/dev/null)
+      [ "$SAVED" -eq "$SAVED" ] 2>/dev/null || SAVED=50
+      inputmodule-control --serial-dev "$DEV" led-matrix --brightness "$SAVED"
       rm -f "$STATEFILE"
     else
-      inputmodule-control --serial-dev "$DEV" led-matrix --sleeping true
-      touch "$STATEFILE"
+      CUR=$(inputmodule-control --serial-dev "$DEV" led-matrix --brightness 2>/dev/null | awk '{print $NF}')
+      CUR="''${CUR:-50}"
+      [ "$CUR" -eq "$CUR" ] 2>/dev/null || CUR=50
+      echo "$CUR" > "$STATEFILE"
+      inputmodule-control --serial-dev "$DEV" led-matrix --brightness 0
     fi
     pkill -RTMIN+9 waybar 2>/dev/null || true
   '';
@@ -218,10 +235,7 @@ let
     case "''$1" in
       up)
         NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP ))
-        if [ -f "$STATEFILE" ]; then
-          inputmodule-control --serial-dev "$DEV" led-matrix --sleeping false
-          rm -f "$STATEFILE"
-        fi
+        rm -f "$STATEFILE"
         ;;
       down)
         NEW=$(( CUR - STEP < 0 ? 0 : CUR - STEP ))
