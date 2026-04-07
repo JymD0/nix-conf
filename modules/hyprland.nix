@@ -26,32 +26,234 @@ let
     DEV="/dev/ttyACM0"
     stty -F "$DEV" 115200 raw -echo 2>/dev/null || true
     case "''$1:''$2" in
-      start:snake)        printf '\x32\xac\x10\x00' > "$DEV" ;;
-      start:pong)         printf '\x32\xac\x10\x01' > "$DEV" ;;
-      start:tetris)       printf '\x32\xac\x10\x02' > "$DEV" ;;
-      start:game-of-life) printf '\x32\xac\x10\x03' > "$DEV" ;;
+      start:snake)        inputmodule-control --serial-dev "$DEV" led-matrix --start-game snake ;;
+      start:pong)         inputmodule-control --serial-dev "$DEV" led-matrix --start-game pong ;;
+      start:game-of-life) inputmodule-control --serial-dev "$DEV" led-matrix --start-game game-of-life --game-param glider ;;
       ctrl:up)            printf '\x32\xac\x11\x00' > "$DEV" ;;
       ctrl:down)          printf '\x32\xac\x11\x01' > "$DEV" ;;
       ctrl:left)          printf '\x32\xac\x11\x02' > "$DEV" ;;
       ctrl:right)         printf '\x32\xac\x11\x03' > "$DEV" ;;
-      ctrl:exit)          printf '\x32\xac\x11\x04' > "$DEV" ;;
+      ctrl:second-left)   printf '\x32\xac\x11\x05' > "$DEV" ;;
+      ctrl:second-right)  printf '\x32\xac\x11\x06' > "$DEV" ;;
+      ctrl:exit)
+        printf '\x32\xac\x11\x04' > "$DEV"
+        inputmodule-control --serial-dev "$DEV" led-matrix --percentage 0
+        ;;
       *) exit 1 ;;
     esac
   '';
 
-  # Fuzzel picker for LED matrix games, enters Hyprland submap on game start
+  # Scrolling ticker — slides a 5-char window through padded text as a loop
+  ledmatrixScroll = pkgs.writeShellScript "ledmatrix-scroll" ''
+    set -euo pipefail
+    DEV="/dev/ttyACM0"
+    PIDFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-scroll.pid"
+    echo $$ > "$PIDFILE"
+    trap 'rm -f "$PIDFILE"' EXIT
+
+    text=$(echo "$1" | tr '[:lower:]' '[:upper:]')
+    delay="''${2:-0.25}"
+    padded="     ''${text}     "
+    len=''${#padded}
+
+    while true; do
+      i=0
+      while [ "$i" -le $((len - 5)) ]; do
+        inputmodule-control --serial-dev "$DEV" led-matrix --string "''${padded:$i:5}"
+        sleep "$delay"
+        i=$((i + 1))
+      done
+    done
+  '';
+
+  # Fuzzel picker for LED matrix — games enter submap, display modes exit immediately
   ledmatrixMenu = pkgs.writeShellScript "ledmatrix-menu" ''
     set -euo pipefail
-    choice=$(printf "Snake\nPong\nTetris\nGame of Life\nStop" | ${pkgs.fuzzel}/bin/fuzzel --dmenu --prompt "LED Matrix  " || true)
+    DEV="/dev/ttyACM0"
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    IC="inputmodule-control --serial-dev $DEV led-matrix"
+
+    choice=$(printf "Snake\nPong\nGame of Life\nWeather\nMood\nText\nScroll\nStop" | $FUZZEL --dmenu --prompt "LED Matrix  " || true)
     [ -z "$choice" ] && exit 0
+
     case "$choice" in
-      Snake)            ${ledmatrixSend} start snake ;;
-      Pong)             ${ledmatrixSend} start pong ;;
-      Tetris)           ${ledmatrixSend} start tetris ;;
-      "Game of Life")   ${ledmatrixSend} start game-of-life ;;
-      Stop)             ${ledmatrixSend} ctrl exit; exit 0 ;;
+      Snake)          ${ledmatrixSend} start snake ;;
+      Pong)           ${ledmatrixSend} start pong ;;
+      "Game of Life")
+        p=$(printf "Glider\nBlinker\nToad\nBeacon\nBeacon-Toad-Blinker\nPattern 1\nCurrent Matrix" | $FUZZEL --dmenu --prompt "GoL Pattern  " || true)
+        [ -z "$p" ] && exit 0
+        case "$p" in
+          Glider)                PARAM="glider" ;;
+          Blinker)               PARAM="blinker" ;;
+          Toad)                  PARAM="toad" ;;
+          Beacon)                PARAM="beacon" ;;
+          "Beacon-Toad-Blinker") PARAM="beacon-toad-blinker" ;;
+          "Pattern 1")           PARAM="pattern1" ;;
+          "Current Matrix")      PARAM="current-matrix" ;;
+          *) exit 0 ;;
+        esac
+        $IC --start-game game-of-life --game-param "$PARAM"
+        exit 0
+        ;;
+
+      Weather)
+        w=$(printf "Sun\nCloud\nSnow\nRain\nThunder" | $FUZZEL --dmenu --prompt "Weather  " || true)
+        [ -z "$w" ] && exit 0
+        case "$w" in
+          Sun)     $IC --symbols sun ;;
+          Cloud)   $IC --symbols cloud ;;
+          Snow)    $IC --symbols snow ;;
+          Rain)    $IC --symbols rain ;;
+          Thunder) $IC --symbols thunder ;;
+        esac
+        exit 0
+        ;;
+
+      Mood)
+        m=$(printf "Happy\nNeutral\nSad\nWink\nHeart" | $FUZZEL --dmenu --prompt "Mood  " || true)
+        [ -z "$m" ] && exit 0
+        case "$m" in
+          Happy)   $IC --symbols ':)' ;;
+          Neutral) $IC --symbols ':|' ;;
+          Sad)     $IC --symbols ':(' ;;
+          Wink)    $IC --symbols ';)' ;;
+          Heart)   $IC --symbols heart ;;
+        esac
+        exit 0
+        ;;
+
+      Text)
+        t=$(printf "" | $FUZZEL --dmenu --prompt "Text (5 chars): " || true)
+        [ -z "$t" ] && exit 0
+        $IC --string "$(echo "$t" | tr '[:lower:]' '[:upper:]')"
+        exit 0
+        ;;
+
+      Scroll)
+        t=$(printf "" | $FUZZEL --dmenu --prompt "Scroll text: " || true)
+        [ -z "$t" ] && exit 0
+        PIDFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-scroll.pid"
+        [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true
+        ${ledmatrixScroll} "$t" &
+        exit 0
+        ;;
+
+      Stop)
+        PIDFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-scroll.pid"
+        [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true
+        ${ledmatrixSend} ctrl exit
+        exit 0
+        ;;
+      *)    exit 0 ;;
     esac
     hyprctl dispatch submap ledmatrix
+  '';
+
+  paletteWebSearch = pkgs.writeShellScript "palette-web-search" ''
+    set -euo pipefail
+    query="$1"
+    encoded=$(printf '%s' "$query" | ${pkgs.jq}/bin/jq -Rr @uri)
+    ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
+  '';
+
+  paletteSSH = pkgs.writeShellScript "palette-ssh" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    filter="''${1:-}"
+    hosts=$(grep -i "^Host " "$HOME/.ssh/config" 2>/dev/null | awk '{print $2}' | grep -v '[*?]' || true)
+    [ -z "$hosts" ] && exit 0
+    if [ -n "$filter" ]; then
+      hosts=$(printf '%s' "$hosts" | grep -i "$filter" || true)
+      [ -z "$hosts" ] && exit 0
+    fi
+    host=$(printf '%s' "$hosts" | $FUZZEL --dmenu --prompt "SSH  " || true)
+    [ -z "$host" ] && exit 0
+    ${pkgs.kitty}/bin/kitty -e ssh "$host"
+  '';
+
+  paletteFiles = pkgs.writeShellScript "palette-files" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    query="''${1:-.}"
+    results=$(${pkgs.fd}/bin/fd "$query" "$HOME" --max-results 50 2>/dev/null || true)
+    [ -z "$results" ] && exit 0
+    file=$(printf '%s' "$results" | $FUZZEL --dmenu --prompt "Open  " || true)
+    [ -z "$file" ] && exit 0
+    ${pkgs.xdg-utils}/bin/xdg-open "$file"
+  '';
+
+  paletteProcessKiller = pkgs.writeShellScript "palette-process-killer" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    filter="''${1:-}"
+    procs=$(ps -eo pid,comm,args --no-headers | grep -v "^ *$$ ")
+    if [ -n "$filter" ]; then
+      procs=$(printf '%s' "$procs" | grep -i "$filter" || true)
+    fi
+    [ -z "$procs" ] && exit 0
+    sel=$(printf '%s' "$procs" | $FUZZEL --dmenu --prompt "Kill  " || true)
+    [ -z "$sel" ] && exit 0
+    pid=$(printf '%s' "$sel" | awk '{print $1}')
+    kill "$pid" 2>/dev/null || true
+    ${pkgs.libnotify}/bin/notify-send "Killed" "PID $pid" -t 2000
+  '';
+
+  paletteColorPicker = pkgs.writeShellScript "palette-color-picker" ''
+    set -euo pipefail
+    color=$(${pkgs.hyprpicker}/bin/hyprpicker 2>/dev/null || true)
+    [ -z "$color" ] && exit 0
+    printf '%s' "$color" | ${pkgs.wl-clipboard}/bin/wl-copy
+    ${pkgs.libnotify}/bin/notify-send "Color copied" "$color" -t 2000
+  '';
+
+  paletteWifi = pkgs.writeShellScript "palette-wifi" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    NMCLI="${pkgs.networkmanager}/bin/nmcli"
+    networks=$($NMCLI -t -f SSID device wifi list 2>/dev/null | sort -u | grep -v '^--$' | grep -v '^$' || true)
+    [ -z "$networks" ] && exit 0
+    ssid=$(printf '%s' "$networks" | $FUZZEL --dmenu --prompt "WiFi  " || true)
+    [ -z "$ssid" ] && exit 0
+    $NMCLI device wifi connect "$ssid" \
+      && ${pkgs.libnotify}/bin/notify-send "WiFi" "Connecting to $ssid" -t 3000 \
+      || ${pkgs.libnotify}/bin/notify-send "WiFi" "Failed to connect to $ssid" -u normal -t 4000
+  '';
+
+  palettePass = pkgs.writeShellScript "palette-pass" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    STORE="$HOME/.password-store"
+    if [ ! -d "$STORE" ]; then
+      ${pkgs.libnotify}/bin/notify-send "pass" "No password store found" -t 3000
+      exit 0
+    fi
+    entries=$(find "$STORE" -name "*.gpg" | sed "s|$STORE/||;s|\.gpg$||" | sort || true)
+    [ -z "$entries" ] && exit 0
+    entry=$(printf '%s' "$entries" | $FUZZEL --dmenu --prompt "Pass  " || true)
+    [ -z "$entry" ] && exit 0
+    ${pkgs.pass}/bin/pass show -c "$entry"
+  '';
+
+  palettePower = pkgs.writeShellScript "palette-power" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    choice=$(printf "Shutdown\nReboot\nSuspend\nLogout\nLock" | $FUZZEL --dmenu --prompt "Power  " || true)
+    [ -z "$choice" ] && exit 0
+    case "$choice" in
+      Shutdown) systemctl poweroff ;;
+      Reboot)   systemctl reboot ;;
+      Suspend)  systemctl suspend ;;
+      Logout)   hyprctl dispatch exit ;;
+      Lock)     ${pkgs.hyprlock}/bin/hyprlock ;;
+    esac
+  '';
+
+  paletteCalc = pkgs.writeShellScript "palette-calc" ''
+    set -euo pipefail
+    expr="$*"
+    result=$(${pkgs.libqalculate}/bin/qalc -t "$expr" 2>/dev/null | tail -1 || echo "error")
+    printf '%s' "$result" | ${pkgs.wl-clipboard}/bin/wl-copy
+    ${pkgs.libnotify}/bin/notify-send "= $result" "$expr" -t 4000
   '';
 
 in
@@ -173,7 +375,8 @@ in
       ];
 
       layerrules = [
-        "noanim, fuzzel"
+        "noanim, namespace:fuzzel"
+        "animation off, namespace:fuzzel"
       ];
 
       "$mod" = "SUPER";
@@ -306,6 +509,8 @@ in
       bind = , s, exec, ${ledmatrixSend} ctrl down
       bind = , a, exec, ${ledmatrixSend} ctrl left
       bind = , d, exec, ${ledmatrixSend} ctrl right
+      bind = , comma, exec, ${ledmatrixSend} ctrl second-left
+      bind = , period, exec, ${ledmatrixSend} ctrl second-right
       bind = , escape, exec, ${ledmatrixSend} ctrl exit
       bind = , escape, submap, reset
       submap = reset
