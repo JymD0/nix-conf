@@ -257,6 +257,47 @@ let
     ${pkgs.libnotify}/bin/notify-send "= $result" "$expr" -t 4000
   '';
 
+  palette = pkgs.writeShellScript "palette" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+
+    input=$(printf "" | $FUZZEL --dmenu --prompt "  " || true)
+    [ -z "$input" ] && exit 0
+
+    prefix="''${input:0:1}"
+    rest="''${input:1}"
+
+    # Conversion pattern: "100 usd to eur", "10 km to miles"
+    if printf '%s' "$input" | grep -qE '^[0-9]+\.?[0-9]*[[:space:]]+[^[:space:]]+[[:space:]]+to[[:space:]]+[^[:space:]]+$'; then
+      ${paletteCalc} "$input"
+      exit 0
+    fi
+
+    # Math pattern: starts with digit or ( and contains an operator
+    if printf '%s' "$input" | grep -qE '^[0-9(]' && printf '%s' "$input" | grep -qE '[+*/^%]|[0-9]-[0-9]'; then
+      ${paletteCalc} "$input"
+      exit 0
+    fi
+
+    case "$prefix" in
+      '?') ${paletteWebSearch} "$rest" ;;
+      ':') ${pkgs.bemoji}/bin/bemoji -t ;;
+      '@') ${paletteSSH} "$rest" ;;
+      '/') ${paletteFiles} "$rest" ;;
+      '>') ${paletteProcessKiller} "$rest" ;;
+      '#') ${paletteColorPicker} ;;
+      *)
+        case "$input" in
+          wifi)  ${paletteWifi} ;;
+          pass)  ${palettePass} ;;
+          power) ${palettePower} ;;
+          led)   ${ledmatrixMenu} ;;
+          *)     exec $FUZZEL --query "$input" ;;
+        esac
+        ;;
+    esac
+  '';
+
 in
 {
   wayland.windowManager.hyprland = {
