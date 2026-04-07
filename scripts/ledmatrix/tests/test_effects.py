@@ -2,6 +2,7 @@ from ledmatrix import ROWS, COLS, Matrix
 from ledmatrix.fire import _step_heat, _build_fire_frame
 from ledmatrix.plasma import _build_plasma_frame
 from ledmatrix.rain import _make_column, _build_rain_frame, _step_columns
+from ledmatrix.metaballs import _make_blob, _build_metaballs_frame, _step_blobs
 
 
 def _empty_heat():
@@ -90,3 +91,39 @@ def test_step_columns_advances_position():
     _step_columns(columns)
     after = [col["pos"] for col in columns]
     assert all(a >= b for a, b in zip(after, before))
+
+
+def test_make_blob_has_required_keys():
+    blob = _make_blob()
+    for key in ("r", "c", "vr", "vc", "radius"):
+        assert key in blob
+
+
+def test_build_metaballs_frame_returns_matrix():
+    blobs = [_make_blob() for _ in range(3)]
+    assert isinstance(_build_metaballs_frame(blobs), Matrix)
+
+
+def test_build_metaballs_frame_brightness_in_range():
+    blobs = [_make_blob() for _ in range(3)]
+    m = _build_metaballs_frame(blobs)
+    for r in range(ROWS):
+        for c in range(COLS):
+            assert 0 <= m.get(r, c) <= 255
+
+
+def test_step_blobs_moves_positions():
+    blobs = [_make_blob() for _ in range(3)]
+    before = [(b["r"], b["c"]) for b in blobs]
+    _step_blobs(blobs)
+    after = [(b["r"], b["c"]) for b in blobs]
+    assert before != after
+
+
+def test_step_blobs_stays_in_bounds():
+    blobs = [_make_blob() for _ in range(3)]
+    for _ in range(200):
+        _step_blobs(blobs)
+    for blob in blobs:
+        assert 0 <= blob["r"] < ROWS
+        assert 0 <= blob["c"] < COLS
