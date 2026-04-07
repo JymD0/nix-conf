@@ -188,10 +188,11 @@ let
 
   # Show LED matrix brightness; hides when /dev/ttyACM0 is absent
   ledmatrixStatusScript = pkgs.writeShellScript "ledmatrix-status" ''
+    IC="${pkgs.inputmodule-control}/bin/inputmodule-control"
     DEV="/dev/ttyACM0"
     [ ! -e "$DEV" ] && exit 0
     STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-sleeping"
-    RAW=$(inputmodule-control --serial-dev "$DEV" led-matrix --brightness 2>/dev/null)
+    RAW=$("$IC" --serial-dev "$DEV" led-matrix --brightness 2>/dev/null)
     BRIGHTNESS=$(echo "$RAW" | awk '{print $NF}')
     BRIGHTNESS="''${BRIGHTNESS:-0}"
     if [ -f "$STATEFILE" ]; then
@@ -203,20 +204,21 @@ let
 
   # Toggle LED matrix on/off by setting brightness to 0 or restoring saved value
   ledmatrixToggleScript = pkgs.writeShellScript "ledmatrix-toggle" ''
+    IC="${pkgs.inputmodule-control}/bin/inputmodule-control"
     DEV="/dev/ttyACM0"
     [ ! -e "$DEV" ] && exit 0
     STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-sleeping"
     if [ -f "$STATEFILE" ]; then
       SAVED=$(cat "$STATEFILE" 2>/dev/null)
       [ "$SAVED" -eq "$SAVED" ] 2>/dev/null || SAVED=50
-      inputmodule-control --serial-dev "$DEV" led-matrix --brightness "$SAVED"
+      "$IC" --serial-dev "$DEV" led-matrix --brightness "$SAVED"
       rm -f "$STATEFILE"
     else
-      CUR=$(inputmodule-control --serial-dev "$DEV" led-matrix --brightness 2>/dev/null | awk '{print $NF}')
+      CUR=$("$IC" --serial-dev "$DEV" led-matrix --brightness 2>/dev/null | awk '{print $NF}')
       CUR="''${CUR:-50}"
       [ "$CUR" -eq "$CUR" ] 2>/dev/null || CUR=50
       echo "$CUR" > "$STATEFILE"
-      inputmodule-control --serial-dev "$DEV" led-matrix --brightness 0
+      "$IC" --serial-dev "$DEV" led-matrix --brightness 0
     fi
     pkill -RTMIN+9 waybar 2>/dev/null || true
   '';
@@ -224,11 +226,12 @@ let
   # Adjust LED matrix brightness by +-10%, wakes on scroll-up if sleeping
   ledmatrixBrightnessScript = pkgs.writeShellScript "ledmatrix-brightness" ''
     set -euo pipefail
+    IC="${pkgs.inputmodule-control}/bin/inputmodule-control"
     DEV="/dev/ttyACM0"
     [ ! -e "$DEV" ] && exit 0
     STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-sleeping"
     STEP=10
-    RAW=$(inputmodule-control --serial-dev "$DEV" led-matrix --brightness 2>/dev/null)
+    RAW=$("$IC" --serial-dev "$DEV" led-matrix --brightness 2>/dev/null)
     CUR=$(echo "$RAW" | awk '{print $NF}')
     CUR="''${CUR:-50}"
     [ "$CUR" -eq "$CUR" ] 2>/dev/null || CUR=50
@@ -242,7 +245,7 @@ let
         ;;
       *) exit 1 ;;
     esac
-    inputmodule-control --serial-dev "$DEV" led-matrix --brightness "$NEW"
+    "$IC" --serial-dev "$DEV" led-matrix --brightness "$NEW"
     pkill -RTMIN+9 waybar 2>/dev/null || true
   '';
 
