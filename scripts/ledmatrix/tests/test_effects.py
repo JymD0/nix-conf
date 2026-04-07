@@ -61,3 +61,36 @@ def test_build_plasma_frame_changes_with_t():
     values1 = [m1.get(r, c) for r in range(ROWS) for c in range(COLS)]
     values2 = [m2.get(r, c) for r in range(ROWS) for c in range(COLS)]
     assert values1 != values2
+
+
+from ledmatrix.rain import _make_column, _build_rain_frame, _step_columns
+
+
+def test_make_column_has_required_keys():
+    col = _make_column()
+    assert "pos" in col
+    assert "speed" in col
+    assert "trail" in col
+
+
+def test_build_rain_frame_returns_matrix():
+    columns = [_make_column() for _ in range(COLS)]
+    assert isinstance(_build_rain_frame(columns), Matrix)
+
+
+def test_build_rain_frame_brightness_in_range():
+    columns = [_make_column() for _ in range(COLS)]
+    for col in columns:
+        col["pos"] = 10.0
+    m = _build_rain_frame(columns)
+    for r in range(ROWS):
+        for c in range(COLS):
+            assert 0 <= m.get(r, c) <= 255
+
+
+def test_step_columns_advances_position():
+    columns = [_make_column() for _ in range(COLS)]
+    before = [col["pos"] for col in columns]
+    _step_columns(columns)
+    after = [col["pos"] for col in columns]
+    assert all(a >= b for a, b in zip(after, before))
