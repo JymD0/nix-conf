@@ -292,7 +292,7 @@ let
           pass)  ${palettePass} ;;
           power) ${palettePower} ;;
           led)   ${ledmatrixMenu} ;;
-          *)     exec $FUZZEL --query "$input" ;;
+          *)     exec "$FUZZEL" --query "$input" ;;
         esac
         ;;
     esac
