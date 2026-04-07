@@ -426,6 +426,7 @@ in
       bind = [
         # Palette
         "$mod, space, exec, ${palette}"
+        # Keyboard layout (DE ↔ Colemak-DH, moved from Super+Space)
         "$mod SHIFT, space, exec, hyprctl switchxkblayout all next"
         "$mod SHIFT, P, exec, ${palettePower}"
         "$mod SHIFT, W, exec, ${paletteWifi}"
