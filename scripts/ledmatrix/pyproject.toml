@@ -8,8 +8,13 @@ version = "0.1.0"
 dependencies = []
 
 [project.scripts]
-ledmatrix-bar      = "ledmatrix.bar:main"
-ledmatrix-charging = "ledmatrix.charging:main"
-ledmatrix-monitor  = "ledmatrix.monitor:main"
-ledmatrix-network  = "ledmatrix.network:main"
-ledmatrix-notify   = "ledmatrix.notify:main"
+ledmatrix-bar       = "ledmatrix.bar:main"
+ledmatrix-charging  = "ledmatrix.charging:main"
+ledmatrix-monitor   = "ledmatrix.monitor:main"
+ledmatrix-network   = "ledmatrix.network:main"
+ledmatrix-notify    = "ledmatrix.notify:main"
+ledmatrix-fire      = "ledmatrix.fire:main"
+ledmatrix-plasma    = "ledmatrix.plasma:main"
+ledmatrix-rain      = "ledmatrix.rain:main"
+ledmatrix-metaballs = "ledmatrix.metaballs:main"
+ledmatrix-starfield = "ledmatrix.starfield:main"
