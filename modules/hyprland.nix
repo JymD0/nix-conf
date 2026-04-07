@@ -314,40 +314,68 @@ let
   palette = pkgs.writeShellScript "palette" ''
     set -euo pipefail
     FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    NMCLI="${pkgs.networkmanager}/bin/nmcli"
 
-    input=$(printf "wifi\npass\npower\nled\n?\n:\n@\n/\n>\n#" | $FUZZEL --dmenu --prompt "  " || true)
-    [ -z "$input" ] && exit 0
+    items=$(
+      printf "shutdown\nreboot\nsuspend\nlogout\nlock\n"
+      printf "emoji\ncolor\nled\n"
+      $NMCLI -t -f SSID device wifi list --rescan no 2>/dev/null \
+        | sort -u | grep -v '^--$' | grep -v '^$' | sed 's/^/wifi  /' || true
+      grep -i "^Host " "$HOME/.ssh/config" 2>/dev/null \
+        | awk '{print $2}' | grep -v '[*?]' | sed 's/^/ssh  /' || true
+      ps -eo comm,pid --no-headers 2>/dev/null \
+        | sort -u | head -50 | awk '{printf "kill  %s (%s)\n", $1, $2}' || true
+      if [ -d "$HOME/.password-store" ]; then
+        ${pkgs.findutils}/bin/find "$HOME/.password-store" -name "*.gpg" \
+          | sed "s|$HOME/.password-store/||;s|\.gpg$||" | sort | sed 's/^/pass  /' || true
+      fi
+    )
 
-    prefix="''${input:0:1}"
-    rest="''${input:1}"
+    sel=$(printf '%s' "$items" | $FUZZEL --dmenu --prompt "  " || true)
+    [ -z "$sel" ] && exit 0
 
-    # Conversion pattern: "100 usd to eur", "10 km to miles"
-    if printf '%s' "$input" | grep -qE '^[0-9]+\.?[0-9]*[[:space:]]+[^[:space:]]+[[:space:]]+to[[:space:]]+[^[:space:]]+$'; then
-      ${paletteCalc} "$input"
-      exit 0
-    fi
-
-    # Math pattern: starts with digit or ( and contains an operator
-    if printf '%s' "$input" | grep -qE '^[0-9(]' && printf '%s' "$input" | grep -qE '[+*/^%]|[0-9]-[0-9]'; then
-      ${paletteCalc} "$input"
-      exit 0
-    fi
-
-    case "$prefix" in
-      '?') ${paletteWebSearch} "$rest" ;;
-      ':') ${pkgs.bemoji}/bin/bemoji -t ;;
-      '@') ${paletteSSH} "$rest" ;;
-      '/') ${paletteFiles} "$rest" ;;
-      '>') ${paletteProcessKiller} "$rest" ;;
-      '#') ${paletteColorPicker} ;;
+    case "$sel" in
+      shutdown) systemctl poweroff ;;
+      reboot)   systemctl reboot ;;
+      suspend)  systemctl suspend ;;
+      logout)   hyprctl dispatch exit ;;
+      lock)     ${pkgs.hyprlock}/bin/hyprlock ;;
+      emoji)    ${pkgs.bemoji}/bin/bemoji -t ;;
+      color)
+        c=$(${pkgs.hyprpicker}/bin/hyprpicker 2>/dev/null || true)
+        [ -z "$c" ] && exit 0
+        printf '%s' "$c" | ${pkgs.wl-clipboard}/bin/wl-copy
+        ${pkgs.libnotify}/bin/notify-send "Color" "$c" -t 2000
+        ;;
+      led) ${ledmatrixMenu} ;;
+      "wifi  "*)
+        ssid="''${sel#wifi  }"
+        $NMCLI device wifi connect "$ssid" \
+          && ${pkgs.libnotify}/bin/notify-send "WiFi" "Connecting to $ssid" -t 3000 \
+          || ${pkgs.libnotify}/bin/notify-send "WiFi" "Failed to connect" -u normal -t 4000
+        ;;
+      "ssh  "*)
+        host="''${sel#ssh  }"
+        ${pkgs.kitty}/bin/kitty -e ssh "$host"
+        ;;
+      "kill  "*)
+        pid=$(printf '%s' "$sel" | grep -oE '\([0-9]+\)$' | tr -d '()')
+        kill "$pid" 2>/dev/null || true
+        ${pkgs.libnotify}/bin/notify-send "Killed" "''${sel#kill  }" -t 2000
+        ;;
+      "pass  "*)
+        entry="''${sel#pass  }"
+        ${pkgs.pass}/bin/pass show -c "$entry"
+        ;;
       *)
-        case "$input" in
-          wifi)  ${paletteWifi} ;;
-          pass)  ${palettePass} ;;
-          power) ${palettePower} ;;
-          led)   ${ledmatrixMenu} ;;
-          *)     exec "$FUZZEL" --query "$input" ;;
-        esac
+        if printf '%s' "$sel" | grep -qE '^[0-9]+\.?[0-9]*[[:space:]]+[^[:space:]]+[[:space:]]+to[[:space:]]+[^[:space:]]+$'; then
+          ${paletteCalc} "$sel"
+        elif printf '%s' "$sel" | grep -qE '^[0-9(]' && printf '%s' "$sel" | grep -qE '[+*/^%]|[0-9]-[0-9]'; then
+          ${paletteCalc} "$sel"
+        else
+          encoded=$(printf '%s' "$sel" | ${pkgs.jq}/bin/jq -Rr @uri)
+          ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
+        fi
         ;;
     esac
   '';
