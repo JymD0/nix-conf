@@ -1,3 +1,4 @@
+import fcntl
 import os
 import struct
 import subprocess
@@ -55,14 +56,21 @@ class Matrix:
         png += _png_chunk(b"IDAT", zlib.compress(raw))
         png += _png_chunk(b"IEND", b"")
 
+        lock_path = f"/run/user/{os.getuid()}/ledmatrix.lock"
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(png)
             tmp = f.name
         try:
-            subprocess.run(
-                [tool, "--serial-dev", dev, "led-matrix", "--image-gray", tmp],
-                check=False,
-                capture_output=True,
-            )
+            with open(lock_path, "w") as lf:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+                try:
+                    subprocess.run(
+                        [tool, "--serial-dev", dev, "led-matrix", "--image-gray", tmp],
+                        check=False,
+                        capture_output=True,
+                        timeout=3,
+                    )
+                except subprocess.TimeoutExpired:
+                    pass
         finally:
             os.unlink(tmp)

@@ -134,7 +134,11 @@ let
         [ -z "$t" ] && exit 0
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ${ledmatrixScroll} "$t" &
         exit 0
@@ -143,7 +147,11 @@ let
       Fire)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ledmatrix-fire --dev "$DEV" &
         exit 0
@@ -152,7 +160,11 @@ let
       Plasma)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ledmatrix-plasma --dev "$DEV" &
         exit 0
@@ -161,7 +173,11 @@ let
       Rain)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ledmatrix-rain --dev "$DEV" &
         exit 0
@@ -170,7 +186,11 @@ let
       Metaballs)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ledmatrix-metaballs --dev "$DEV" &
         exit 0
@@ -179,7 +199,11 @@ let
       Starfield)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ledmatrix-starfield --dev "$DEV" &
         exit 0
@@ -188,7 +212,11 @@ let
       Stop)
         for _f in fire plasma rain metaballs starfield scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          [ -f "$_pf" ] && kill "$(cat "$_pf")" 2>/dev/null || true
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
         done
         ${ledmatrixSend} ctrl exit
         exit 0
