@@ -1,5 +1,7 @@
 from ledmatrix import ROWS, COLS, Matrix
 from ledmatrix.fire import _step_heat, _build_fire_frame
+from ledmatrix.plasma import _build_plasma_frame
+from ledmatrix.rain import _make_column, _build_rain_frame, _step_columns
 
 
 def _empty_heat():
@@ -41,9 +43,6 @@ def test_build_fire_frame_brightness_in_range():
             assert 0 <= m.get(r, c) <= 255
 
 
-from ledmatrix.plasma import _build_plasma_frame
-
-
 def test_build_plasma_frame_returns_matrix():
     assert isinstance(_build_plasma_frame(0.0), Matrix)
 
@@ -61,9 +60,6 @@ def test_build_plasma_frame_changes_with_t():
     values1 = [m1.get(r, c) for r in range(ROWS) for c in range(COLS)]
     values2 = [m2.get(r, c) for r in range(ROWS) for c in range(COLS)]
     assert values1 != values2
-
-
-from ledmatrix.rain import _make_column, _build_rain_frame, _step_columns
 
 
 def test_make_column_has_required_keys():
