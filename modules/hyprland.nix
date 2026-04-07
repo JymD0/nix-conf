@@ -151,7 +151,8 @@ let
 
   paletteWebSearch = pkgs.writeShellScript "palette-web-search" ''
     set -euo pipefail
-    query="$1"
+    query="''${1:-}"
+    [ -z "$query" ] && exit 0
     encoded=$(printf '%s' "$query" | ${pkgs.jq}/bin/jq -Rr @uri)
     ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
   '';
@@ -227,7 +228,7 @@ let
       ${pkgs.libnotify}/bin/notify-send "pass" "No password store found" -t 3000
       exit 0
     fi
-    entries=$(find "$STORE" -name "*.gpg" | sed "s|$STORE/||;s|\.gpg$||" | sort || true)
+    entries=$(${pkgs.findutils}/bin/find "$STORE" -name "*.gpg" | ${pkgs.gnused}/bin/sed "s|$STORE/||;s|\.gpg$||" | ${pkgs.coreutils}/bin/sort || true)
     [ -z "$entries" ] && exit 0
     entry=$(printf '%s' "$entries" | $FUZZEL --dmenu --prompt "Pass  " || true)
     [ -z "$entry" ] && exit 0
