@@ -452,6 +452,17 @@ in
           on-click = "xdg-open \"http://localhost:5600/#/activity/$(hostname)/view/\"";
         };
 
+        "custom/ledmatrix" = {
+          interval = 3;
+          return-type = "json";
+          exec = "${ledmatrixStatusScript}";
+          signal = 9;
+          format = "{}";
+          on-click = "${ledmatrixToggleScript}";
+          on-scroll-up = "${ledmatrixBrightnessScript} up";
+          on-scroll-down = "${ledmatrixBrightnessScript} down";
+        };
+
         tray = {
           icon-size = 16;
           spacing = 8;
@@ -481,6 +492,7 @@ in
           "temperature"
           "pulseaudio"
           "backlight"
+          "custom/ledmatrix"
           "battery"
           "custom/power-draw"
           "network"
@@ -668,6 +680,9 @@ in
         #backlight,
         #custom-brightness { color: #f1fa8c; }
 
+        #custom-ledmatrix       { color: #bd93f9; padding: 0 10px; }
+        #custom-ledmatrix.off   { color: #6272a4; }
+
         #battery          { color: #50fa7b; }
         #battery.warning  { color: #f1fa8c; }
         #battery.critical {
@@ -769,6 +784,7 @@ in
         window#waybar:not(.eDP-1) #pulseaudio,
         window#waybar:not(.eDP-1) #backlight,
         window#waybar:not(.eDP-1) #custom-brightness,
+        window#waybar:not(.eDP-1) #custom-ledmatrix,
         window#waybar:not(.eDP-1) #bluetooth,
         window#waybar:not(.eDP-1) #battery,
         window#waybar:not(.eDP-1) #power-profiles-daemon,
