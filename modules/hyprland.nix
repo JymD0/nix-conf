@@ -200,7 +200,12 @@ let
 
   paletteWebSearch = pkgs.writeShellScript "palette-web-search" ''
     set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
     query="''${1:-}"
+    if [ -z "$query" ]; then
+      query=$(printf "search the web..." | $FUZZEL --dmenu --prompt "Search  " || true)
+      [ "$query" = "search the web..." ] && exit 0
+    fi
     [ -z "$query" ] && exit 0
     encoded=$(printf '%s' "$query" | ${pkgs.jq}/bin/jq -Rr @uri)
     ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
@@ -310,7 +315,7 @@ let
     set -euo pipefail
     FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
 
-    input=$(printf "wifi\npass\npower\nled" | $FUZZEL --dmenu --prompt "  " || true)
+    input=$(printf "wifi\npass\npower\nled\n?\n:\n@\n/\n>\n#" | $FUZZEL --dmenu --prompt "  " || true)
     [ -z "$input" ] && exit 0
 
     prefix="''${input:0:1}"
