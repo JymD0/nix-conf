@@ -261,7 +261,7 @@ let
     set -euo pipefail
     FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
 
-    input=$(printf "" | $FUZZEL --dmenu --prompt "  " || true)
+    input=$(printf "wifi\npass\npower\nled" | $FUZZEL --dmenu --prompt "  " || true)
     [ -z "$input" ] && exit 0
 
     prefix="''${input:0:1}"
