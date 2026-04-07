@@ -3,6 +3,7 @@ from ledmatrix.fire import _step_heat, _build_fire_frame
 from ledmatrix.plasma import _build_plasma_frame
 from ledmatrix.rain import _make_column, _build_rain_frame, _step_columns
 from ledmatrix.metaballs import _make_blob, _build_metaballs_frame, _step_blobs
+from ledmatrix.starfield import _make_star, _build_starfield_frame, _step_stars, MAX_Z
 
 
 def _empty_heat():
@@ -127,3 +128,36 @@ def test_step_blobs_stays_in_bounds():
     for blob in blobs:
         assert 0 <= blob["r"] < ROWS
         assert 0 <= blob["c"] < COLS
+
+
+def test_make_star_has_required_keys():
+    star = _make_star()
+    for key in ("x", "y", "z", "speed"):
+        assert key in star
+
+
+def test_make_star_z_in_range():
+    for _ in range(20):
+        star = _make_star()
+        assert 0 < star["z"] <= MAX_Z
+
+
+def test_build_starfield_frame_returns_matrix():
+    stars = [_make_star() for _ in range(30)]
+    assert isinstance(_build_starfield_frame(stars), Matrix)
+
+
+def test_build_starfield_frame_brightness_in_range():
+    stars = [_make_star() for _ in range(30)]
+    m = _build_starfield_frame(stars)
+    for r in range(ROWS):
+        for c in range(COLS):
+            assert 0 <= m.get(r, c) <= 255
+
+
+def test_step_stars_decrements_z():
+    stars = [_make_star() for _ in range(30)]
+    before = [s["z"] for s in stars]
+    _step_stars(stars)
+    after = [s["z"] for s in stars]
+    assert any(a < b or a == MAX_Z for a, b in zip(after, before))
