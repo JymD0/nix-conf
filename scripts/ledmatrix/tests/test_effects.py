@@ -39,3 +39,25 @@ def test_build_fire_frame_brightness_in_range():
     for r in range(ROWS):
         for c in range(COLS):
             assert 0 <= m.get(r, c) <= 255
+
+
+from ledmatrix.plasma import _build_plasma_frame
+
+
+def test_build_plasma_frame_returns_matrix():
+    assert isinstance(_build_plasma_frame(0.0), Matrix)
+
+
+def test_build_plasma_frame_brightness_in_range():
+    m = _build_plasma_frame(1.23)
+    for r in range(ROWS):
+        for c in range(COLS):
+            assert 0 <= m.get(r, c) <= 255
+
+
+def test_build_plasma_frame_changes_with_t():
+    m1 = _build_plasma_frame(0.0)
+    m2 = _build_plasma_frame(1.0)
+    values1 = [m1.get(r, c) for r in range(ROWS) for c in range(COLS)]
+    values2 = [m2.get(r, c) for r in range(ROWS) for c in range(COLS)]
+    assert values1 != values2
