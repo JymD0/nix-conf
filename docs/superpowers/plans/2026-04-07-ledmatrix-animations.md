@@ -31,49 +31,17 @@
 
 ---
 
-### Task 0: Verify the serial FRAME_CMD byte
+### Task 0: Verify --image-gray command
 
 **Files:** None (manual investigation only)
 
-The `send()` method writes `[0x32, 0xAC, FRAME_CMD] + 306 brightness bytes`. The correct `FRAME_CMD` for a full greyscale frame must be confirmed before implementing `send()`.
+RESOLVED: raw serial is not needed. `inputmodule-control` exposes `led-matrix --image-gray <PATH>`
+which accepts a 9-wide × 34-tall grayscale PNG. The binary asserts `width == 9` and `height == 34`.
+`send()` will generate this PNG in-process (no extra deps) and subprocess into `inputmodule-control`.
 
-- [ ] **Step 1: Install pyserial in a temporary shell**
-
-Run: `nix-shell -p python3Packages.pyserial --run bash`
-
-- [ ] **Step 2: Test candidate byte 0x07**
-
-Run inside that shell:
-
-```python
-python3 -c "
-import serial
-with serial.Serial('/dev/ttyACM0', 115200, timeout=1) as s:
-    frame = bytearray(306)
-    frame[0] = 255
-    s.write(bytes([0x32, 0xAC, 0x07]) + bytes(frame))
-print('sent 0x07')
-"
-```
-
-Expected: the top-left LED lights up, all others dark.
-If nothing happens, repeat with `0x06`, then `0x0E`.
-
-- [ ] **Step 3: Test clear (all off)**
-
-```python
-python3 -c "
-import serial
-with serial.Serial('/dev/ttyACM0', 115200, timeout=1) as s:
-    s.write(bytes([0x32, 0xAC, 0x07]) + bytes(306))
-"
-```
-
-Expected: all LEDs off.
-
-- [ ] **Step 4: Note the confirmed byte**
-
-Write the confirmed value as a comment at the top of `scripts/ledmatrix/ledmatrix/__init__.py` when creating it in Task 1. Use it as `_FRAME_CMD`.
+- [x] **Confirmed:** use `inputmodule-control --serial-dev DEV led-matrix --image-gray TMPFILE`
+- [x] **Confirmed:** display is portrait — 9 wide × 34 tall → ROWS=34, COLS=9
+- [x] **Confirmed:** no pyserial needed — drop from pyproject.toml and Nix derivation
 
 ---
 
@@ -85,6 +53,10 @@ Write the confirmed value as a comment at the top of `scripts/ledmatrix/ledmatri
 - Create: `scripts/ledmatrix/tests/__init__.py`
 - Create: `scripts/ledmatrix/tests/test_matrix.py`
 
+NOTE: ROWS=34, COLS=9 (portrait: 9 wide × 34 tall, confirmed from `inputmodule-control` binary assertions).
+`send()` generates a 9×34 PNG in-process using stdlib only and calls `inputmodule-control --image-gray`.
+No pyserial dependency.
+
 - [ ] **Step 1: Write `tests/test_matrix.py` (failing)**
 
 ```python
@@ -93,6 +65,8 @@ from ledmatrix import Matrix, ROWS, COLS
 
 def test_dimensions():
     m = Matrix()
+    assert ROWS == 34
+    assert COLS == 9
     assert len(m.buf) == ROWS
     assert len(m.buf[0]) == COLS
 
@@ -103,6 +77,13 @@ def test_set_clamps():
     m.set(0, 0, -10)
     assert m.get(0, 0) == 0
 
+def test_set_oob_is_ignored():
+    m = Matrix()
+    m.set(-1, 0, 255)
+    m.set(0, -1, 255)
+    m.set(ROWS, 0, 255)
+    m.set(0, COLS, 255)
+
 def test_clear():
     m = Matrix()
     m.set(0, 0, 200)
@@ -112,21 +93,21 @@ def test_clear():
 def test_fill():
     m = Matrix()
     m.fill(128)
-    assert m.get(4, 17) == 128
+    assert m.get(17, 4) == 128
 
 def test_snake_pos_row0_left_to_right():
     m = Matrix()
     assert m.snake_pos(0) == (0, 0)
-    assert m.snake_pos(33) == (0, 33)
+    assert m.snake_pos(8) == (0, 8)
 
 def test_snake_pos_row1_right_to_left():
     m = Matrix()
-    assert m.snake_pos(34) == (1, 33)
-    assert m.snake_pos(67) == (1, 0)
+    assert m.snake_pos(9) == (1, 8)
+    assert m.snake_pos(17) == (1, 0)
 
 def test_snake_pos_row2_left_to_right():
     m = Matrix()
-    assert m.snake_pos(68) == (2, 0)
+    assert m.snake_pos(18) == (2, 0)
 
 def test_snake_pos_covers_all_pixels():
     m = Matrix()
@@ -142,17 +123,19 @@ Expected: `ModuleNotFoundError: No module named 'ledmatrix'`
 
 - [ ] **Step 3: Create `scripts/ledmatrix/ledmatrix/__init__.py`**
 
-Replace `_FRAME_CMD = 0x07` with the value confirmed in Task 0.
+Display is portrait: 9 wide × 34 tall. PNG is generated in-process using stdlib struct+zlib.
+`inputmodule-control --image-gray` is the serial transport — no pyserial needed.
 
 ```python
 import os
-import serial
+import struct
+import subprocess
+import tempfile
+import zlib
 
-ROWS = 9
-COLS = 34
+ROWS = 34  # height of display (34 tall)
+COLS = 9   # width of display (9 wide)
 
-# Confirmed in Task 0: command byte for full greyscale frame blit
-_FRAME_CMD = 0x07
 
 class Matrix:
     def __init__(self):
@@ -182,12 +165,36 @@ class Matrix:
             col = COLS - 1 - col
         return row, col
 
-    def send(self, dev="/dev/ttyACM0"):
+    def send(self, dev="/dev/ttyACM0", tool="inputmodule-control"):
         if not os.path.exists(dev):
             return
-        frame = bytes(self.buf[r][c] for r in range(ROWS) for c in range(COLS))
-        with serial.Serial(dev, 115200, timeout=1) as s:
-            s.write(bytes([0x32, 0xAC, _FRAME_CMD]) + frame)
+
+        def _png_chunk(tag, data):
+            crc = zlib.crc32(tag + data) & 0xFFFFFFFF
+            return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
+
+        raw = b""
+        for r in range(ROWS):
+            raw += b"\x00"
+            for c in range(COLS):
+                raw += bytes([self.buf[r][c]])
+
+        png = b"\x89PNG\r\n\x1a\n"
+        png += _png_chunk(b"IHDR", struct.pack(">IIBBBBB", COLS, ROWS, 8, 0, 0, 0, 0))
+        png += _png_chunk(b"IDAT", zlib.compress(raw))
+        png += _png_chunk(b"IEND", b"")
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(png)
+            tmp = f.name
+        try:
+            subprocess.run(
+                [tool, "--serial-dev", dev, "led-matrix", "--image-gray", tmp],
+                check=False,
+                capture_output=True,
+            )
+        finally:
+            os.unlink(tmp)
 ```
 
 - [ ] **Step 4: Create `scripts/ledmatrix/tests/__init__.py` — empty init for tests package**
@@ -198,9 +205,11 @@ Create `scripts/ledmatrix/tests/__init__.py` as an empty file.
 
 Run: `cd scripts/ledmatrix && python3 -m pytest tests/test_matrix.py -v`
 
-Expected: all 8 tests pass.
+Expected: all 9 tests pass.
 
 - [ ] **Step 6: Create `scripts/ledmatrix/pyproject.toml`**
+
+No pyserial — stdlib only.
 
 ```toml
 [build-system]
@@ -210,7 +219,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ledmatrix"
 version = "0.1.0"
-dependencies = ["pyserial"]
+dependencies = []
 
 [project.scripts]
 ledmatrix-bar      = "ledmatrix.bar:main"
@@ -252,18 +261,18 @@ def test_n_lit_fifty():
 
 def test_build_frame_sets_lit_pixels():
     m = build_frame(50)
-    assert m.get(0, 0) == 255   # snake index 0
-    assert m.get(0, 33) == 255  # snake index 33 (last of row 0)
-    assert m.get(1, 33) == 255  # snake index 34 (first of row 1, right-to-left)
+    assert m.get(0, 0) == 255   # snake index 0 (row 0, col 0)
+    assert m.get(0, 8) == 255   # snake index 8 (last of row 0, COLS-1=8)
+    assert m.get(1, 8) == 255   # snake index 9 (first of row 1, right-to-left)
 
 def test_build_frame_leaves_unlit_dark():
     m = build_frame(0)
     assert m.get(0, 0) == 0
-    assert m.get(4, 17) == 0
+    assert m.get(17, 4) == 0
 
 def test_build_frame_full():
     m = build_frame(100)
-    assert m.get(8, 0) == 255  # last row, last pixel in snake order
+    assert m.get(33, 0) == 255  # last row (row 33), last pixel in snake order
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -276,7 +285,6 @@ Expected: `ModuleNotFoundError: No module named 'ledmatrix.bar'`
 
 ```python
 import argparse
-import math
 import os
 import subprocess
 import time
@@ -398,7 +406,8 @@ git commit -m "feat: add ledmatrix bar animation"
 **Files:**
 - Create: `scripts/ledmatrix/ledmatrix/charging.py`
 
-The bolt sprite is 5 cols × 7 rows, placed at row offset 1, col offset 15 (centered on 34×9 grid).
+Display is portrait 9 wide × 34 tall. The bolt is 5 cols wide × 15 rows tall, centered at row 9, col 2
+(top-left offset: row=(34-15)//2=9, col=(9-5)//2=2).
 
 - [ ] **Step 1: Create `scripts/ledmatrix/ledmatrix/charging.py`**
 
@@ -407,18 +416,27 @@ import argparse
 import time
 from ledmatrix import Matrix
 
-# Bolt pixel offsets (row, col) relative to BOLT_R, BOLT_C
+# Bolt pixel offsets (row, col) relative to _BOLT_R, _BOLT_C
+# 5 wide x 15 tall lightning bolt, centered on portrait 9x34 display
 _BOLT = [
-    (0, 2), (0, 3),
-    (1, 1), (1, 2),
-    (2, 0), (2, 1),
-    (3, 0), (3, 1), (3, 2), (3, 3), (3, 4),
-    (4, 3), (4, 4),
-    (5, 2), (5, 3),
-    (6, 1), (6, 2),
+    (0,  2), (0,  3),
+    (1,  2), (1,  3),
+    (2,  1), (2,  2), (2,  3),
+    (3,  1), (3,  2), (3,  3),
+    (4,  0), (4,  1), (4,  2), (4,  3), (4,  4),
+    (5,  0), (5,  1), (5,  2), (5,  3), (5,  4),
+    (6,  2), (6,  3), (6,  4),
+    (7,  2), (7,  3), (7,  4),
+    (8,  3), (8,  4),
+    (9,  3), (9,  4),
+    (10, 3),
+    (11, 3),
+    (12, 3),
+    (13, 3),
+    (14, 3),
 ]
-_BOLT_R = 1   # top-left row of sprite on the 9-row grid
-_BOLT_C = 15  # top-left col of sprite on the 34-col grid
+_BOLT_R = 9   # (34 - 15) // 2 = 9
+_BOLT_C = 2   # (9 - 5) // 2 = 2
 
 def _draw_bolt(m, brightness):
     for dr, dc in _BOLT:
@@ -518,7 +536,8 @@ git commit -m "feat: add ledmatrix charging animation"
 **Files:**
 - Create: `scripts/ledmatrix/ledmatrix/monitor.py`
 
-Rectangle outline 28×7, top-left at row=1, col=3. Expand from center on connect; contract to center on disconnect.
+Display is portrait 9 wide × 34 tall. Rectangle outline 7 wide × 28 tall, top-left at row=3, col=1.
+Expand from center on connect; contract to center on disconnect.
 
 - [ ] **Step 1: Create `scripts/ledmatrix/ledmatrix/monitor.py`**
 
@@ -527,10 +546,10 @@ import argparse
 import time
 from ledmatrix import Matrix, ROWS, COLS
 
-_RECT_R = 1
-_RECT_C = 3
-_RECT_H = 7
-_RECT_W = 28
+_RECT_R = 3   # (34 - 28) // 2 = 3
+_RECT_C = 1   # (9 - 7) // 2 = 1
+_RECT_H = 28  # height (rows)
+_RECT_W = 7   # width (cols)
 
 def _rect_pixels(r0, c0, h, w):
     px = []
@@ -543,14 +562,14 @@ def _rect_pixels(r0, c0, h, w):
     return px
 
 def _connect(dev):
-    cr = _RECT_R + _RECT_H // 2
-    cc = _RECT_C + _RECT_W // 2
+    cr = _RECT_R + _RECT_H // 2   # row 17
+    cc = _RECT_C + _RECT_W // 2   # col 4
 
     stages = [
-        _rect_pixels(cr, cc, 1, 1),
-        _rect_pixels(cr - 1, cc - 2, 3, 5),
-        _rect_pixels(cr - 2, cc - 6, 5, 13),
-        _rect_pixels(cr - 3, cc - 13, 7, 27),
+        _rect_pixels(cr,     cc,     1,  1),
+        _rect_pixels(cr - 2, cc - 1, 5,  3),
+        _rect_pixels(cr - 5, cc - 2, 11, 5),
+        _rect_pixels(cr - 9, cc - 3, 19, 7),
         _rect_pixels(_RECT_R, _RECT_C, _RECT_H, _RECT_W),
     ]
 
@@ -584,10 +603,10 @@ def _disconnect(dev):
 
     stages = [
         _rect_pixels(_RECT_R, _RECT_C, _RECT_H, _RECT_W),
-        _rect_pixels(cr - 3, cc - 13, 7, 27),
-        _rect_pixels(cr - 2, cc - 6, 5, 13),
-        _rect_pixels(cr - 1, cc - 2, 3, 5),
-        _rect_pixels(cr, cc, 1, 1),
+        _rect_pixels(cr - 9, cc - 3, 19, 7),
+        _rect_pixels(cr - 5, cc - 2, 11, 5),
+        _rect_pixels(cr - 2, cc - 1, 5,  3),
+        _rect_pixels(cr,     cc,     1,  1),
     ]
 
     for px in stages:
@@ -638,7 +657,8 @@ git commit -m "feat: add ledmatrix monitor connect/disconnect animation"
 **Files:**
 - Create: `scripts/ledmatrix/ledmatrix/network.py`
 
-Arcs radiate from left edge (wifi) or center (vpn). Each arc is a thin ring drawn by checking distance from origin.
+Display is portrait 9 wide × 34 tall. Arcs radiate from the top edge (wifi: row=0, col=4) or center
+(vpn: row=17, col=4). Radii 4, 8, 12, 16.
 
 - [ ] **Step 1: Create `scripts/ledmatrix/ledmatrix/network.py`**
 
@@ -684,7 +704,7 @@ def _animate_arcs(dev, radii, origin_r, origin_c, reverse=False):
     if reverse:
         for _ in range(2):
             m = Matrix()
-            m.set(origin_r, min(origin_c, COLS - 1), 255)
+            m.set(min(origin_r, ROWS - 1), min(origin_c, COLS - 1), 255)
             m.send(dev)
             time.sleep(0.15)
             m = Matrix()
@@ -699,11 +719,11 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "wifi":
-        origin_r, origin_c = 4, 0
+        origin_r, origin_c = 0, 4   # top edge, horizontal center
     else:
-        origin_r, origin_c = 4, 17
+        origin_r, origin_c = 17, 4  # vertical center, horizontal center
 
-    radii = [5, 10, 15, 20]
+    radii = [4, 8, 12, 16]
     _animate_arcs(args.dev, radii, origin_r, origin_c, reverse=(args.direction == "down"))
 ```
 
@@ -783,12 +803,12 @@ def main():
 
     if args.type == "message":
         pixels = list(_ENVELOPE)
-        row_offset = (ROWS - 5) // 2
-        col_offset = (COLS - 7) // 2
+        row_offset = (ROWS - 5) // 2   # (34 - 5) // 2 = 14
+        col_offset = (COLS - 7) // 2   # (9 - 7) // 2 = 1
     else:
         pixels = _QUESTION
-        row_offset = (ROWS - 5) // 2
-        col_offset = (COLS - 3) // 2
+        row_offset = (ROWS - 5) // 2   # 14
+        col_offset = (COLS - 3) // 2   # (9 - 3) // 2 = 3
 
     _show(pixels, row_offset, col_offset, args.dev, args.duration)
 ```
@@ -833,7 +853,7 @@ let
     src = ../scripts/ledmatrix;
     pyproject = true;
     build-system = [ pkgs.python3Packages.setuptools ];
-    propagatedBuildInputs = [ pkgs.python3Packages.pyserial ];
+    propagatedBuildInputs = [];
   };
 in
 ```
