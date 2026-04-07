@@ -424,8 +424,11 @@ in
       "$mod" = "SUPER";
 
       bind = [
-        # Switch keyboard layout (DE ↔ Colemak-DH)
-        "$mod, space, exec, hyprctl switchxkblayout all next"
+        # Palette
+        "$mod, space, exec, ${palette}"
+        "$mod SHIFT, space, exec, hyprctl switchxkblayout all next"
+        "$mod SHIFT, P, exec, ${palettePower}"
+        "$mod SHIFT, W, exec, ${paletteWifi}"
 
         "$mod, Q, exec, kitty"
         "$mod, C, killactive,"
