@@ -214,9 +214,7 @@ let
     RAW=$(inputmodule-control --serial-dev "$DEV" led-matrix --brightness 2>/dev/null)
     CUR=$(echo "$RAW" | awk '{print $NF}')
     CUR="''${CUR:-50}"
-    case "$CUR" in
-      *[!0-9]*|'''') CUR=50 ;;
-    esac
+    [ "$CUR" -eq "$CUR" ] 2>/dev/null || CUR=50
     case "''$1" in
       up)
         NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP ))
