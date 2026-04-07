@@ -202,23 +202,18 @@ let
     fi
   '';
 
-  # Toggle LED matrix on/off by setting brightness to 0 or restoring saved value
+  # Toggle LED matrix sleep state
   ledmatrixToggleScript = pkgs.writeShellScript "ledmatrix-toggle" ''
     IC="${pkgs.inputmodule-control}/bin/inputmodule-control"
     DEV="/dev/ttyACM0"
     [ ! -e "$DEV" ] && exit 0
     STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-sleeping"
     if [ -f "$STATEFILE" ]; then
-      SAVED=$(cat "$STATEFILE" 2>/dev/null)
-      [ "$SAVED" -eq "$SAVED" ] 2>/dev/null || SAVED=50
-      "$IC" --serial-dev "$DEV" led-matrix --brightness "$SAVED"
+      "$IC" --serial-dev "$DEV" led-matrix --sleeping false
       rm -f "$STATEFILE"
     else
-      CUR=$("$IC" --serial-dev "$DEV" led-matrix --brightness 2>/dev/null | awk '{print $NF}')
-      CUR="''${CUR:-50}"
-      [ "$CUR" -eq "$CUR" ] 2>/dev/null || CUR=50
-      echo "$CUR" > "$STATEFILE"
-      "$IC" --serial-dev "$DEV" led-matrix --brightness 0
+      "$IC" --serial-dev "$DEV" led-matrix --sleeping true
+      touch "$STATEFILE"
     fi
     pkill -RTMIN+9 waybar 2>/dev/null || true
   '';
@@ -238,7 +233,10 @@ let
     case "''$1" in
       up)
         NEW=$(( CUR + STEP > 100 ? 100 : CUR + STEP ))
-        rm -f "$STATEFILE"
+        if [ -f "$STATEFILE" ]; then
+          "$IC" --serial-dev "$DEV" led-matrix --sleeping false
+          rm -f "$STATEFILE"
+        fi
         ;;
       down)
         NEW=$(( CUR - STEP < 0 ? 0 : CUR - STEP ))
