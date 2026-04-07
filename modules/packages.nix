@@ -1,5 +1,16 @@
 { config, pkgs, lib, user, ... }:
 
+let
+  ledmatrix-pkg = pkgs.python3.pkgs.buildPythonApplication {
+    pname = "ledmatrix";
+    version = "0.1.0";
+    src = ../scripts/ledmatrix;
+    format = "pyproject";
+    nativeBuildInputs = [ pkgs.python3.pkgs.setuptools ];
+    doCheck = false;
+  };
+in
+
 {
   # ─── Fonts ─────────────────────────────────────────────────────────────────────
   fonts.fontconfig.enable = true;
@@ -14,6 +25,13 @@
     # QoL tools
     cliphist
     bemoji
+    wtype
+
+    # Palette tools
+    libqalculate   # qalc CLI: calculator + unit/currency converter
+    hyprpicker     # color picker (Wayland)
+    pass           # password manager
+    wl-clipboard   # wl-copy / wl-paste
 
     # File manager
     nemo
@@ -28,8 +46,7 @@
     networkmanagerapplet
 
     # Display management
-    wdisplays
-    kanshi
+    nwg-displays
 
     # Lock screen
     hyprlock
@@ -82,8 +99,10 @@
     khal
     vdirsyncer
 
-    # LaTeX
+    # Document / publishing
     texliveMedium
+    pandoc    # convert markdown to PDF (uses LaTeX backend)
+    typst     # modern typesetting system
 
     # Utilities
     ripgrep
@@ -91,6 +110,8 @@
     jq
     unzip
     p7zip
+    unrar
+    zstd
 
     # Language toolchains
     nodejs
@@ -105,7 +126,7 @@
     # Linters & formatters
     shellcheck
     ruff
-    nixfmt-rfc-style
+    nixfmt
     statix
     deadnix
     cppcheck
@@ -127,6 +148,10 @@
       matplotlib
       torchvision
     ]))
+
+    # LED matrix animations
+    ledmatrix-pkg
+    socat
 
     # Misc
     xdg-utils
