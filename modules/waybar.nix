@@ -61,15 +61,16 @@ let
   '';
 
   powerMenu = pkgs.writeShellScript "power-menu" ''
-    choice=$(printf '󰌾  Lock\n󰒲  Suspend\n󰍃  Log out\n󰋊  Hibernate\n󰑓  Reboot\n󰐥  Shut down' | \
-      fuzzel --dmenu --prompt '⏻  ' --width 24 --lines 6 --no-icons)
+    choice=$(printf '󰌾  Lock\n󰈈  Work Mode\n󰒲  Sleep\n󰍃  Log out\n󰋊  Hibernate\n󰑓  Reboot\n󰐥  Shut down' | \
+      fuzzel --dmenu --prompt '⏻  ' --width 24 --lines 7 --no-icons)
     case "$choice" in
-      *Lock*)        hyprlock ;;
-      *Suspend*)     systemctl suspend-then-hibernate ;;
+      *Lock*)        hyprlock-led ;;
+      *"Work Mode"*) work-mode ;;
+      *Sleep*)       systemctl suspend-then-hibernate ;;
       *"Log out"*)   hyprctl dispatch exit 0 ;;
       *Hibernate*)
         notify-send -u critical -i system-hibernate "Hibernating…" "Saving RAM to disk"
-        systemctl hibernate
+        systemctl hibernate --check-inhibitors=no
         ;;
       *Reboot*)      systemctl reboot ;;
       *"Shut down"*) systemctl poweroff ;;
@@ -245,6 +246,21 @@ let
     esac
     "$IC" --serial-dev "$DEV" led-matrix --brightness "$NEW"
     pkill -RTMIN+9 waybar 2>/dev/null || true
+  '';
+
+  # Sunshine remote streaming status for Waybar
+  sunshineWaybarScript = pkgs.writeShellScript "waybar-sunshine" ''
+    # hide module entirely if sunshine isn't running
+    systemctl --user is-active sunshine.service >/dev/null 2>&1 || exit 0
+
+    LAST=$(${pkgs.systemd}/bin/journalctl --user -u sunshine --no-pager -o cat -n 200 2>/dev/null \
+      | grep -E "CLIENT (CONNECTED|DISCONNECTED)" | tail -1 || true)
+
+    if echo "$LAST" | grep -q "CLIENT CONNECTED"; then
+      printf '{"text":"󰢹","tooltip":"Sunshine: streaming","class":"streaming"}\n'
+    else
+      printf '{"text":"󰢹","tooltip":"Sunshine: idle","class":"idle"}\n'
+    fi
   '';
 
 in
@@ -433,6 +449,15 @@ in
           on-click-right = "tailscale down";
         };
 
+        "custom/sunshine" = {
+          interval = 5;
+          return-type = "json";
+          exec = "${sunshineWaybarScript}";
+          format = "{}";
+          on-click = "xdg-open https://localhost:47990";
+          tooltip = true;
+        };
+
         "custom/notification" = {
           interval = 3;
           format = "{}";
@@ -510,6 +535,7 @@ in
           "custom/power-draw"
           "network"
           "custom/tailscale"
+          "custom/sunshine"
           "bluetooth"
           "power-profiles-daemon"
           "custom/notification"
@@ -552,6 +578,7 @@ in
               "custom/power-draw"
               "network"
               "custom/tailscale"
+              "custom/sunshine"
               "bluetooth"
               "power-profiles-daemon"
               "custom/notification"
@@ -665,6 +692,7 @@ in
         #custom-tailscale,
         #custom-power-draw,
         #custom-notification,
+        #custom-sunshine,
         #tray,
         #custom-power {
           padding: 0 10px;
@@ -715,6 +743,9 @@ in
 
         #custom-tailscale              { color: #8be9fd; }
         #custom-tailscale.disconnected { color: #6272a4; }
+
+        #custom-sunshine              { color: #bd93f9; }
+        #custom-sunshine.idle         { color: #6272a4; }
 
         #bluetooth     { color: #8be9fd; }
         #bluetooth.off { color: #6272a4; }
@@ -805,6 +836,7 @@ in
         window#waybar:not(.eDP-1) #custom-media,
         window#waybar:not(.eDP-1) #custom-youtube-sync,
         window#waybar:not(.eDP-1) #custom-tailscale,
+        window#waybar:not(.eDP-1) #custom-sunshine,
         window#waybar:not(.eDP-1) #custom-notification,
         window#waybar:not(.eDP-1) #custom-power-draw,
         window#waybar:not(.eDP-1) #tray,
