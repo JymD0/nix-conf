@@ -9,6 +9,89 @@ let
     nativeBuildInputs = [ pkgs.python3.pkgs.setuptools ];
     doCheck = false;
   };
+
+  # Wraps hyprlock so the LED matrix shows a lock/unlock animation on every lock.
+  hyprlock-led = pkgs.writeShellScriptBin "hyprlock-led" ''
+    set -euo pipefail
+    trap '${ledmatrix-pkg}/bin/ledmatrix-unlock unlock &' EXIT
+    ${ledmatrix-pkg}/bin/ledmatrix-unlock lock &
+    ${pkgs.hyprlock}/bin/hyprlock "$@"
+  '';
+
+  # Screen off, lights off, but wifi and processes keep running.
+  # Does NOT lock the session immediately (that would kill remote-control
+  # and other Wayland clients). Instead it blanks everything and polls for
+  # user input (DPMS wake). When the user wakes the screen, hyprlock kicks
+  # in so they still need to authenticate.
+  work-mode = pkgs.writeShellScriptBin "work-mode" ''
+    set -euo pipefail
+    HC="${pkgs.hyprland}/bin/hyprctl"
+    IC="${pkgs.inputmodule-control}/bin/inputmodule-control"
+    BC="${pkgs.brightnessctl}/bin/brightnessctl"
+    DEV="/dev/ttyACM0"
+    INHIBIT_PID=""
+    SUPPRESS_DIR="''${XDG_RUNTIME_DIR:-/tmp}/hypridle-suppress"
+    SUPPRESS_FLAG="$SUPPRESS_DIR/work-mode"
+    mkdir -p "$SUPPRESS_DIR"
+
+    # suppress hypridle via shared flag
+    touch "$SUPPRESS_FLAG"
+    systemctl --user stop hypridle.service 2>/dev/null || true
+
+    # save current keyboard backlight so we can restore it
+    KBD_BRIGHTNESS=$("$BC" -d framework_laptop::kbd_backlight g 2>/dev/null || echo "")
+
+    cleanup() {
+      [ -n "$INHIBIT_PID" ] && kill "$INHIBIT_PID" 2>/dev/null && wait "$INHIBIT_PID" 2>/dev/null || true
+
+      "$HC" keyword misc:mouse_move_enables_dpms false
+      "$HC" keyword misc:key_press_enables_dpms false
+      "$HC" dispatch dpms on
+
+      # release suppress flag, only restart hypridle if no other suppressor is active
+      rm -f "$SUPPRESS_FLAG"
+      if [ -z "$(ls -A "$SUPPRESS_DIR" 2>/dev/null)" ]; then
+        systemctl --user start hypridle.service 2>/dev/null || true
+      fi
+
+      # restore keyboard backlight
+      [ -n "$KBD_BRIGHTNESS" ] && "$BC" -d framework_laptop::kbd_backlight s "$KBD_BRIGHTNESS" 2>/dev/null || true
+
+      # wake the LED matrix
+      [ -e "$DEV" ] && "$IC" --serial-dev "$DEV" led-matrix --sleeping false 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    # hold a sleep inhibitor in the background for the lifetime of this script
+    ${pkgs.systemd}/bin/systemd-inhibit \
+      --what=sleep:idle --who=work-mode --why="Work mode active" \
+      --mode=block sleep infinity &
+    INHIBIT_PID=$!
+
+    # let input wake DPMS (hyprland defaults these to false)
+    "$HC" keyword misc:mouse_move_enables_dpms true
+    "$HC" keyword misc:key_press_enables_dpms true
+
+    # turn off keyboard backlight
+    "$BC" -d framework_laptop::kbd_backlight s 0 2>/dev/null || true
+
+    # put the LED matrix to sleep
+    [ -e "$DEV" ] && "$IC" --serial-dev "$DEV" led-matrix --sleeping true 2>/dev/null || true
+
+    # turn screen off (no session lock, so Claude and remote-control keep working)
+    "$HC" dispatch dpms off
+
+    # poll until the user wakes the screen (any input turns DPMS back on)
+    while true; do
+      sleep 1
+      if "$HC" monitors -j 2>/dev/null | grep -q '"dpmsStatus": true'; then
+        break
+      fi
+    done
+
+    # screen is back on, lock it now
+    hyprlock-led
+  '';
 in
 
 {
@@ -27,8 +110,7 @@ in
     bemoji
     wtype
 
-    # Palette tools
-    libqalculate   # qalc CLI: calculator + unit/currency converter
+    # Tools (used by walker menus and keybindings)
     hyprpicker     # color picker (Wayland)
     pass           # password manager
     wl-clipboard   # wl-copy / wl-paste
@@ -48,8 +130,10 @@ in
     # Display management
     nwg-displays
 
-    # Lock screen
+    # Lock screen (hyprlock-led wraps hyprlock with LED matrix animations)
     hyprlock
+    hyprlock-led
+    work-mode
 
     # Terminal multiplexer
     tmux
@@ -73,6 +157,7 @@ in
 
     # Apps
     discord
+    foxglove-studio
     pinta
     vlc
     thunderbird
@@ -85,6 +170,9 @@ in
 
     # Icons
     papirus-icon-theme
+
+    # Git
+    gh
 
     # SSH & File Transfer
     termscp
@@ -195,6 +283,20 @@ in
       obs-backgroundremoval   # virtual background / chroma key alternative
       obs-gstreamer       # GStreamer video/audio source support
     ];
+  };
+
+  xdg.configFile."obs-studio/basic/profiles/Untitled/basic.ini" = {
+    force = true;
+    text = ''
+    [General]
+    Name=Untitled
+
+    [SimpleOutput]
+    FilePath=/home/jymdo/Videos
+
+    [AdvOut]
+    RecFilePath=/home/jymdo/Videos
+  '';
   };
 
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
