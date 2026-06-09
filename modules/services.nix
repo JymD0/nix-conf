@@ -243,6 +243,11 @@ let
 
     trap 'release_idle; exit 0' EXIT INT TERM
 
+    # recover state if restarting mid-session
+    LAST=$(${pkgs.systemd}/bin/journalctl --user -u sunshine --no-pager -o cat -n 200 2>/dev/null \
+      | grep -E "CLIENT (CONNECTED|DISCONNECTED)" | tail -1 || true)
+    case "$LAST" in *"CLIENT CONNECTED"*) suppress_idle ;; esac
+
     ${pkgs.systemd}/bin/journalctl --user -u sunshine -f -o cat --no-hostname | while IFS= read -r line; do
       case "$line" in
         *"CLIENT CONNECTED"*)
