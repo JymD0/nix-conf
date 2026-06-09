@@ -1,20 +1,74 @@
-{ pkgs, user, claude-code, ... }:
+{ pkgs, lib, user, claude-code, claude-desktop, ... }:
 
+let
+  computer-use-pkg = pkgs.python3.pkgs.buildPythonApplication {
+    pname = "computer-use";
+    version = "0.1.0";
+    src = ../scripts/computer-use;
+    format = "pyproject";
+
+    nativeBuildInputs = [
+      pkgs.python3.pkgs.setuptools
+      pkgs.gobject-introspection
+      pkgs.wrapGAppsHook3
+    ];
+
+    propagatedBuildInputs = with pkgs.python3.pkgs; [
+      mcp
+      pillow
+      pycairo
+      pygobject3
+    ];
+
+    buildInputs = [
+      pkgs.at-spi2-core
+      pkgs.gtk4
+      pkgs.gtk4-layer-shell
+    ];
+
+    # prevent wrapGAppsHook from double-wrapping (buildPythonApplication already wraps)
+    dontWrapGApps = true;
+
+    # merge GI typelib paths and runtime tools into the Python wrapper
+    # LD_PRELOAD for gtk4-layer-shell: must load before libwayland-client
+    preFixup = ''
+      makeWrapperArgs+=(
+        "''${gappsWrapperArgs[@]}"
+        --prefix PATH : ${pkgs.lib.makeBinPath [
+          pkgs.grim
+          pkgs.wtype
+          pkgs.ydotool
+          pkgs.wl-clipboard
+          pkgs.hyprland
+        ]}
+        --set LD_PRELOAD ${pkgs.gtk4-layer-shell}/lib/libgtk4-layer-shell.so
+        --set YDOTOOL_SOCKET /run/ydotoold/socket
+      )
+    '';
+
+    doCheck = false;
+  };
+in
 {
   home.packages = [
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
+    claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.claude-desktop
+    computer-use-pkg
   ];
 
   # ─── Claude Code ────────────────────────────────────────────────────────────
 
-  # MCP servers (contains instance URLs — managed here, not in settings.json)
-  home.file.".claude/.mcp.json".force = true;
-  home.file.".claude/.mcp.json".text = builtins.toJSON {
-    mcpServers.metamcp = {
-      type = "http";
-      url = user.metamcpUrl;
-    };
-  };
+  # MCP servers (registered at user scope in ~/.claude.json via activation script)
+  # Can't overwrite ~/.claude.json directly since Claude Code manages other state there.
+  # "computer-use" is a reserved name, so we use "hypr-computer-use".
+  home.activation.registerMcpServers = let
+    claude-cli = claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  in lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    # remove stale entry then re-add with current store path
+    ${claude-cli}/bin/claude mcp remove --scope user hypr-computer-use 2>/dev/null || true
+    ${claude-cli}/bin/claude mcp add --scope user --transport stdio hypr-computer-use -- \
+      ${computer-use-pkg}/bin/computer-use-server
+  '';
 
   # Global preferences (applies to every session across all projects)
   home.file.".claude/CLAUDE.md" = {
@@ -62,9 +116,12 @@
   };
 
   # Settings (permissions, hooks, plugins — no secrets)
-  home.file.".claude/settings.json" = {
-    force = true;
-    text = builtins.toJSON {
+  # Written via activation script (not home.file) so Claude Code can modify
+  # it at runtime (e.g. /effort). Refreshed on each home-manager switch.
+  home.activation.claudeSettings =
+    let
+      settingsJson = pkgs.writeText "claude-settings.json" (builtins.toJSON {
+      model = "claude-opus-4-6";
       env = {
         EDITOR = "vim";
         PAGER = "bat --plain";
@@ -252,6 +309,10 @@
                 type = "command";
                 command = "~/.claude/hooks/youtube-pause.sh";
               }
+              {
+                type = "command";
+                command = "~/.claude/hooks/cost-stop.sh";
+              }
             ];
           }
         ];
@@ -275,9 +336,11 @@
         "superpowers@claude-plugins-official" = true;
         "feature-dev@claude-plugins-official" = true;
       };
-      effortLevel = "medium";
-    };
-  };
+    });
+    in
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        install -Dm644 ${settingsJson} "$HOME/.claude/settings.json"
+      '';
 
   # Status line script (Dracula-themed)
   home.file.".claude/statusline.sh" = {
@@ -286,7 +349,7 @@
     text = ''
       #!/usr/bin/env bash
       # Claude Code status line — Dracula-themed
-      # Displays: model | git branch (dirty) | context bar | cost | duration | worktree | rate limits
+      # Layout: session-dur | repo ⎇ branch ~N (age) [worktree] | model ctx% | 5h X% · 7d X% · $X.XX · $X.XX/wk
       set -uo pipefail
 
       INPUT=$(cat 2>/dev/null) || exit 0
@@ -297,22 +360,35 @@
       DURATION_MS=$(echo "$INPUT" | jq -r '.cost.total_duration_ms // 0')
       CTX_PCT=$(echo "$INPUT" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
       RATE_5H=$(echo "$INPUT" | jq -r '.rate_limits.five_hour.used_percentage // 0' | cut -d. -f1)
+      RATE_5H_RESET=$(echo "$INPUT" | jq -r '.rate_limits.five_hour.resets_at // empty')
       RATE_7D=$(echo "$INPUT" | jq -r '.rate_limits.seven_day.used_percentage // 0' | cut -d. -f1)
+      RATE_7D_RESET=$(echo "$INPUT" | jq -r '.rate_limits.seven_day.resets_at // empty')
       WORKTREE=$(echo "$INPUT" | jq -r '.worktree.name // empty')
+      EFFORT=$(echo "$INPUT" | jq -r '.effort.level // empty')
 
       # Dracula ANSI colors
       PURPLE='\033[38;5;141m'   # bd93f9
       GREEN='\033[38;5;84m'     # 50fa7b
       CYAN='\033[38;5;117m'     # 8be9fd
       ORANGE='\033[38;5;215m'   # ffb86c
-      PINK='\033[38;5;212m'     # ff79c6
       RED='\033[38;5;203m'      # ff5555
       YELLOW='\033[38;5;228m'   # f1fa8c
       FG='\033[38;5;253m'       # f8f8f2
       DIM='\033[38;5;242m'      # 6272a4
       RESET='\033[0m'
 
-      # Git branch + dirty file count + last commit age
+      # Session duration from ms
+      DURATION_S=$((DURATION_MS / 1000))
+      if [ "$DURATION_S" -ge 3600 ]; then
+        DUR="$((DURATION_S / 3600))h$((DURATION_S % 3600 / 60))m"
+      elif [ "$DURATION_S" -ge 60 ]; then
+        DUR="$((DURATION_S / 60))m$((DURATION_S % 60))s"
+      else
+        DUR="''${DURATION_S}s"
+      fi
+
+      # Repo name + git branch + dirty count + last commit age
+      REPO=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "")
       BRANCH=$(git branch --show-current 2>/dev/null || echo "")
       DIRTY=""
       LAST_COMMIT=""
@@ -334,65 +410,92 @@
         fi
       fi
 
-      # Context bar (10 chars wide, using safe block chars)
-      FILLED=$((CTX_PCT / 10))
-      EMPTY=$((10 - FILLED))
-      if [ "$CTX_PCT" -ge 80 ]; then
-        BAR_COLOR="$RED"
-      elif [ "$CTX_PCT" -ge 50 ]; then
-        BAR_COLOR="$ORANGE"
-      else
-        BAR_COLOR="$GREEN"
-      fi
-      BAR="''${BAR_COLOR}$(printf '%*s' "$FILLED" "" | tr ' ' '#')''${DIM}$(printf '%*s' "$EMPTY" "" | tr ' ' '-')''${RESET}"
+# Rate limit percentage color
+      rate_color() {
+        local pct="$1"
+        if [ "$pct" -ge 80 ]; then
+          echo "$RED"
+        elif [ "$pct" -ge 50 ]; then
+          echo "$ORANGE"
+        else
+          echo "$GREEN"
+        fi
+      }
 
-      # Duration: convert ms to human-readable
-      DURATION_S=$((DURATION_MS / 1000))
-      if [ "$DURATION_S" -ge 3600 ]; then
-        DUR="$((DURATION_S / 3600))h$((DURATION_S % 3600 / 60))m"
-      elif [ "$DURATION_S" -ge 60 ]; then
-        DUR="$((DURATION_S / 60))m$((DURATION_S % 60))s"
-      else
-        DUR="''${DURATION_S}s"
-      fi
+      RATE_5H_COLOR=$(rate_color "$RATE_5H")
+      RATE_7D_COLOR=$(rate_color "$RATE_7D")
+
+      # Reset time countdown from unix epoch (omitted if field absent)
+      # Always shows two units: Xd Yh or Xh Ym or Xm
+      reset_in() {
+        local ts="$1"
+        [ -z "$ts" ] && return
+        local diff=$(( ts - $(date +%s) ))
+        [ "$diff" -le 0 ] && return
+        if [ "$diff" -ge 86400 ]; then
+          echo " $(( diff / 86400 ))d$(( diff % 86400 / 3600 ))h"
+        elif [ "$diff" -ge 3600 ]; then
+          echo " $(( diff / 3600 ))h$(( diff % 3600 / 60 ))m"
+        else
+          echo " $(( diff / 60 ))m"
+        fi
+      }
+
+      RESET_5H=$(reset_in "$RATE_5H_RESET")
+      RESET_7D=$(reset_in "$RATE_7D_RESET")
 
       # Cost formatting (force C locale for decimal point)
       COST_FMT=$(LC_NUMERIC=C printf '%.2f' "$COST")
 
-      # Rate limit mini-bars (always visible, 5 chars each)
-      rate_bar() {
-        local pct="$1" label="$2"
-        local fill=$((pct / 20))  # 5 chars wide, each = 20%
-        local empty=$((5 - fill))
-        local color
-        if [ "$pct" -ge 80 ]; then
-          color="$RED"
-        elif [ "$pct" -ge 50 ]; then
-          color="$ORANGE"
-        else
-          color="$GREEN"
-        fi
-        echo "''${DIM}''${label}''${RESET}''${color}$(printf '%*s' "$fill" "" | tr ' ' '#')''${DIM}$(printf '%*s' "$empty" "" | tr ' ' '-')''${RESET}"
-      }
+      # Track session cost so the Stop hook can record it for weekly rollup
+      SESSION_CACHE_DIR="$HOME/.cache/claude-sessions"
+      mkdir -p "$SESSION_CACHE_DIR"
+      printf '%s %s\n' "$(date +%s)" "$COST" > "$SESSION_CACHE_DIR/$PPID"
 
-      RATE_5H_BAR=$(rate_bar "$RATE_5H" "5h")
-      RATE_7D_BAR=$(rate_bar "$RATE_7D" "7d")
+      # Weekly cost: sum closed sessions from past 7 days (5-min cache) + current session
+      WEEKLY_CACHE="$HOME/.cache/claude-weekly-cost"
+      COST_LOG_DIR="$HOME/.local/share/claude-costs"
+      if [ -n "$RATE_7D_RESET" ]; then
+        WEEK_AGO=$(( RATE_7D_RESET - 604800 ))
+      else
+        WEEK_AGO=$(( $(date +%s) - 604800 ))
+      fi
+      WEEK_CLOSED=0
+      RECOMPUTE=1
+      if [ -f "$WEEKLY_CACHE" ]; then
+        CACHE_AGE=$(( $(date +%s) - $(stat -c %Y "$WEEKLY_CACHE") ))
+        [ "$CACHE_AGE" -lt 300 ] && RECOMPUTE=0
+      fi
+      if [ "$RECOMPUTE" -eq 1 ]; then
+        WEEK_CLOSED=$(
+          find "$COST_LOG_DIR" -name "*.log" -maxdepth 1 2>/dev/null | \
+          xargs -r awk -v ago="$WEEK_AGO" '
+            $1+0 >= ago { sum += $2+0 }
+            END { printf "%.6f", sum+0 }
+          ' 2>/dev/null || echo 0
+        )
+        printf '%s\n' "$WEEK_CLOSED" > "$WEEKLY_CACHE"
+      else
+        WEEK_CLOSED=$(cat "$WEEKLY_CACHE" 2>/dev/null || echo 0)
+      fi
+      WEEK_COST_FMT=$(LC_NUMERIC=C awk -v c="$COST" -v w="$WEEK_CLOSED" 'BEGIN{printf "%.2f", c+w}')
 
       # Build status line
-      LINE="''${PURPLE}''${MODEL}''${RESET}"
+      LINE="''${FG}''${DUR}''${RESET}"
 
       if [ -n "$BRANCH" ]; then
-        LINE+=" ''${DIM}|''${RESET} ''${CYAN}''${BRANCH}''${RESET}''${DIRTY}''${LAST_COMMIT}"
+        LINE+=" ''${DIM}|''${RESET} ''${FG}''${REPO}''${RESET} ''${CYAN}⎇ ''${BRANCH}''${RESET}''${DIRTY}''${LAST_COMMIT}"
+        if [ -n "$WORKTREE" ]; then
+          LINE+=" ''${YELLOW}[''${WORKTREE}]''${RESET}"
+        fi
       fi
 
-      if [ -n "$WORKTREE" ]; then
-        LINE+=" ''${DIM}|''${RESET} ''${YELLOW}''${WORKTREE}''${RESET}"
+      EFFORT_TAG=""
+      if [ -n "$EFFORT" ]; then
+        EFFORT_TAG=" ''${DIM}[''${EFFORT}]''${RESET}"
       fi
-
-      LINE+=" ''${DIM}|''${RESET} ''${BAR} ''${FG}''${CTX_PCT}%''${RESET}"
-      LINE+=" ''${DIM}|''${RESET} ''${GREEN}\$''${COST_FMT}''${RESET}"
-      LINE+=" ''${DIM}|''${RESET} ''${PINK}''${DUR}''${RESET}"
-      LINE+=" ''${DIM}|''${RESET} ''${RATE_5H_BAR} ''${RATE_7D_BAR}"
+      LINE+=" ''${DIM}|''${RESET} ''${PURPLE}''${MODEL}''${RESET}''${EFFORT_TAG} ''${FG}''${CTX_PCT}%''${RESET}"
+      LINE+=" ''${DIM}|''${RESET} ''${RATE_5H_COLOR}5h ''${RATE_5H}%''${DIM}''${RESET_5H}''${RESET} ''${DIM}·''${RESET} ''${RATE_7D_COLOR}7d ''${RATE_7D}%''${DIM}''${RESET_7D}''${RESET} ''${DIM}·''${RESET} ''${GREEN}\$''${COST_FMT}''${RESET} ''${DIM}·''${RESET} ''${GREEN}\$''${WEEK_COST_FMT}/wk''${RESET}"
 
       echo -e "$LINE"
     '';
@@ -420,10 +523,10 @@
       }
 
       # Filesystem destruction
-      re='rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f[[:alpha:]]*[[:space:]]+/([[:space:];*&|"'\''`]|$)'
+      re='rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f[[:alpha:]]*[[:space:]]+/([[:space:];*&|"'\'''`]|$)'
       [[ "$COMMAND" =~ $re ]] && block "Blocked: recursive delete of root filesystem"
 
-      re='rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f[[:alpha:]]*[[:space:]]+(~|\$HOME)/?([[:space:];*&|"'\''`]|$)'
+      re='rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f[[:alpha:]]*[[:space:]]+(~|\$HOME)/?([[:space:];*&|"'\'''`]|$)'
       [[ "$COMMAND" =~ $re ]] && block "Blocked: recursive delete of home directory"
 
       re='sudo[[:space:]]+rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f'
@@ -648,27 +751,120 @@
     '';
   };
 
-  # Hook: resume media when Claude starts thinking
+  # Hook: resume media when Claude starts thinking (only if all instances are working)
   home.file.".claude/hooks/youtube-resume.sh" = {
     force = true;
     executable = true;
     text = ''
       #!/usr/bin/env bash
       cat >/dev/null 2>&1
-      [ -f "$HOME/.claude/youtube-sync" ] && playerctl play 2>/dev/null
+      [ -f "$HOME/.claude/youtube-sync" ] || exit 0
+
+      dir="$HOME/.claude/youtube-instances"
+      mkdir -p "$dir"
+
+      # record submission time so the pause hook can apply a grace period
+      date +%s > "$dir/$PPID.ts"
+
+      # mark this instance as working
+      echo working > "$dir/$PPID"
+
+      # clean up stale instances whose process died
+      for f in "$dir"/*; do
+        [ -f "$f" ] || continue
+        pid=$(basename "$f")
+        [[ "$pid" == *.ts ]] && continue
+        kill -0 "$pid" 2>/dev/null || rm -f "$f" "$dir/$pid.ts"
+      done
+
+      # only play if every remaining instance is working
+      for f in "$dir"/*; do
+        [ -f "$f" ] || continue
+        [[ "$(basename "$f")" == *.ts ]] && continue
+        if [ "$(cat "$f")" = "idle" ]; then
+          exit 0
+        fi
+      done
+
+      playerctl play 2>/dev/null
       exit 0
     '';
   };
 
-  # Hook: pause media when Claude finishes responding
+  # Hook: pause media when Claude finishes responding (any idle instance pauses)
   home.file.".claude/hooks/youtube-pause.sh" = {
     force = true;
     executable = true;
     text = ''
       #!/usr/bin/env bash
       cat >/dev/null 2>&1
-      [ -f "$HOME/.claude/youtube-sync" ] && playerctl pause 2>/dev/null
+      [ -f "$HOME/.claude/youtube-sync" ] || exit 0
+
+      dir="$HOME/.claude/youtube-instances"
+      mkdir -p "$dir"
+
+      # clean up stale instances whose process died
+      for f in "$dir"/*; do
+        [ -f "$f" ] || continue
+        pid=$(basename "$f")
+        [[ "$pid" == *.ts ]] && continue
+        kill -0 "$pid" 2>/dev/null || rm -f "$f" "$dir/$pid.ts"
+      done
+
+      # skip re-pausing within 10s of this session's last prompt submission.
+      # without this, fast Claude responses re-pause before the user can submit
+      # to other sessions, making multi-session resume impossible.
+      ts_file="$dir/$PPID.ts"
+      if [ -f "$ts_file" ]; then
+        last=$(cat "$ts_file" 2>/dev/null)
+        now=$(date +%s)
+        if [ -n "$last" ] && [ $((now - last)) -lt 10 ]; then
+          exit 0
+        fi
+      fi
+
+      # mark this instance as idle
+      echo idle > "$dir/$PPID"
+
+      playerctl pause 2>/dev/null
       exit 0
+    '';
+  };
+
+  # Hook: record session cost delta to daily log for weekly rollup.
+  # Stop fires after every response, not just at session end, so we log
+  # the delta since the last Stop rather than the cumulative cost to avoid
+  # inflating the weekly total.
+  home.file.".claude/hooks/cost-stop.sh" = {
+    force = true;
+    executable = true;
+    text = ''
+      #!/usr/bin/env bash
+      set -uo pipefail
+      cat >/dev/null 2>&1
+
+      SESSION_FILE="$HOME/.cache/claude-sessions/$PPID"
+      [ -f "$SESSION_FILE" ] || exit 0
+
+      { read -r TIMESTAMP COST; } < "$SESSION_FILE" 2>/dev/null || exit 0
+
+      COST_LOG_DIR="$HOME/.local/share/claude-costs"
+      mkdir -p "$COST_LOG_DIR"
+
+      LOGGED_FILE="$HOME/.cache/claude-sessions/$PPID.logged"
+      LAST_LOGGED=$(cat "$LOGGED_FILE" 2>/dev/null || echo 0)
+
+      DELTA=$(LC_NUMERIC=C awk -v c="$COST" -v l="$LAST_LOGGED" 'BEGIN{printf "%.6f", c-l}')
+
+      # Only log if there is meaningful new spend
+      if LC_NUMERIC=C awk -v d="$DELTA" 'BEGIN{exit (d > 0.000001) ? 0 : 1}'; then
+        printf '%s %s\n' "$TIMESTAMP" "$DELTA" >> "$COST_LOG_DIR/$(date -d @"$TIMESTAMP" +%Y-%m-%d).log"
+        printf '%s\n' "$COST" > "$LOGGED_FILE"
+      fi
+
+      # Drop logs older than 8 days; clean up stale session tracking files
+      find "$COST_LOG_DIR" -name "*.log" -mtime +8 -delete 2>/dev/null || true
+      find "$HOME/.cache/claude-sessions" -name "*.logged" -mtime +1 -delete 2>/dev/null || true
     '';
   };
 

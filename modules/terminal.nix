@@ -22,6 +22,8 @@
       repaint_delay = 10;
       input_delay = 3;
       sync_to_monitor = true;
+      allow_remote_control = "socket-only";
+      listen_on = "unix:/tmp/kitty-{kitty_pid}";
 
       foreground           = "#f8f8f2";
       background           = "#282a36";
@@ -50,7 +52,7 @@
     settings = {
       main = {
         font = "JetBrainsMono Nerd Font:size=13";
-        dpi-aware = "auto";
+        dpi-aware = "no";
         icon-theme = "Papirus-Dark";
         icons-enabled = true;
         terminal = "kitty";

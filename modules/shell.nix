@@ -60,6 +60,9 @@
       gd      = "git diff";
       gl      = "git log --oneline --graph -20";
 
+      # LED matrix (auto-discovery broken due to libudev-zero in nixpkgs)
+      ledmatrix = "inputmodule-control --serial-dev /dev/ttyACM0 led-matrix";
+
       # Quick helpers
       mkcd    = "(){mkdir -p \"$1\" && cd \"$1\";}";
       ".."    = "cd ..";

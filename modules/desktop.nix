@@ -1,5 +1,16 @@
 { config, pkgs, lib, ... }:
 
+let
+  ledmatrix-pkg = pkgs.python3.pkgs.buildPythonApplication {
+    pname = "ledmatrix";
+    version = "0.1.0";
+    src = ../scripts/ledmatrix;
+    format = "pyproject";
+    nativeBuildInputs = [ pkgs.python3.pkgs.setuptools ];
+    doCheck = false;
+  };
+in
+
 {
   # ─── Variety setup (mutable files — variety needs chmod and write access) ────
   home.activation.varietySetup = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -155,7 +166,12 @@ SCRIPT
 
       scripts = {
         "notification-sound" = {
-          exec = "canberra-gtk-play -i message-new-instant -d notification";
+          exec = "${pkgs.libcanberra-gtk3}/bin/canberra-gtk-play -i message-new-instant -d notification";
+          app-name = ".*";
+          run-on = "receive";
+        };
+        "ledmatrix-notify" = {
+          exec = "${ledmatrix-pkg}/bin/ledmatrix-notify envelope";
           app-name = ".*";
           run-on = "receive";
         };
@@ -477,9 +493,9 @@ SCRIPT
     enable = true;
     settings = {
       general = {
-        lock_cmd = "pidof hyprlock || hyprlock";
+        lock_cmd = "pidof hyprlock || hyprlock-led";
         before_sleep_cmd = "loginctl lock-session";
-        after_sleep_cmd = "hyprctl dispatch dpms on; hyprctl setcursor Bibata-Modern-Classic 24";
+        after_sleep_cmd = "sleep 1 && hyprctl dispatch dpms on; hyprctl setcursor Bibata-Modern-Classic 24";
       };
       listener = [
         {
@@ -497,35 +513,47 @@ SCRIPT
           on-resume = "hyprctl dispatch dpms on";
         }
         {
-          timeout = 1800; # 30 min — suspend-then-hibernate when idle
-          on-timeout = "systemctl suspend-then-hibernate";
+          timeout = 1800; # 30 min — skip suspend when performance profile is active
+          on-timeout = "powerprofilesctl get | grep -q performance || systemctl suspend-then-hibernate";
         }
       ];
     };
   };
 
   # ─── Kanshi (display profiles) ───────────────────────────────────────────────
+  # Add a new profile block for each setup you use regularly.
+  # Fallback for unknown setups: Hyprland's wildcard monitor rule kicks in.
   services.kanshi = {
     enable = true;
     settings = [
-      # Laptop screen only
       {
-        profile.name = "laptop-only";
-        profile.outputs = [{
-          criteria = "eDP-1";
-          status   = "enable";
-        }];
-      }
-
-      # Any external monitor connected — Hyprland's auto-down rule places
-      # eDP-1 below whatever external is active, regardless of its resolution.
-      {
-        profile.name = "docked";
+        profile.name = "laptop";
         profile.outputs = [
-          { criteria = "*";     status = "enable"; }
           { criteria = "eDP-1"; status = "enable"; }
         ];
-        profile.exec = [ "sleep 1 && [ -L \"$HOME/.current-wallpaper\" ] && swww img \"$(readlink -f \"$HOME/.current-wallpaper\")\" --transition-type fade --transition-duration 1 --transition-fps 60" ];
+      }
+      {
+        profile.name = "desk-msi";
+        profile.outputs = [
+          { criteria = "DP-2"; position = "0,0"; status = "enable"; }
+          { criteria = "eDP-1"; position = "0,1440"; status = "enable"; }
+        ];
+      }
+      {
+        profile.name = "desk-acer";
+        profile.outputs = [
+          { criteria = "DP-4"; position = "0,0"; status = "enable"; }
+          { criteria = "eDP-1"; position = "0,1440"; status = "enable"; }
+        ];
+      }
+      # Acer on the left (rotated 90°), MSI top-right, laptop below MSI.
+      {
+        profile.name = "triple";
+        profile.outputs = [
+          { criteria = "DP-4"; position = "0,0"; transform = "90"; status = "enable"; }
+          { criteria = "DP-2"; position = "1440,0"; status = "enable"; }
+          { criteria = "eDP-1"; position = "1440,1440"; status = "enable"; }
+        ];
       }
     ];
   };

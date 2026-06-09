@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # ============================================================
-# NixOS FW16 AMD Setup Script
+# NixOS Setup Script
 # ============================================================
 
-VERSION="1.3.4"
+VERSION="1.4.0"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,22 +28,52 @@ RAW_BASE="https://raw.githubusercontent.com/JymD0/nix-conf/main"
 detect_current_values() {
   local user="/etc/nixos/user.nix"
   DETECTED_HOSTNAME="" DETECTED_USERNAME="" DETECTED_FULLNAME="" DETECTED_EMAIL=""
+  DETECTED_TIMEZONE="" DETECTED_LOCALE="" DETECTED_KEYBOARD="" DETECTED_HARDWARE=""
+  DETECTED_WINDOWS_UUID="" DETECTED_SSH_HOSTS=""
 
   if [[ -f "$user" ]]; then
-    local h u f e
-    h=$(grep -oP 'hostname\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    local h u f e tz lc kb hw wu
+    h=$(grep -oP '^\s*hostname\s*=\s*"\K[^"]+' "$user" 2>/dev/null | head -1)
     u=$(grep -oP 'username\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
     f=$(grep -oP 'fullName\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
     e=$(grep -oP 'email\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
-    [[ "$h" != "yourHostname" ]]          && DETECTED_HOSTNAME="$h"
-    [[ "$u" != "yourUsername" ]]           && DETECTED_USERNAME="$u"
-    [[ "$f" != "Your Name"   ]]           && DETECTED_FULLNAME="$f"
-    [[ "$e" != "your.email@example.com" ]] && DETECTED_EMAIL="$e"
+    tz=$(grep -oP 'timezone\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    lc=$(grep -oP 'locale\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    kb=$(grep -oP 'keyboardLayout\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    hw=$(grep -oP 'hardware\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    wu=$(grep -oP 'windowsEfiUuid\s*=\s*"\K[^"]+' "$user" 2>/dev/null || true)
+    [[ "$h" != "yourHostname" ]]             && DETECTED_HOSTNAME="$h"  || true
+    [[ "$u" != "yourUsername" ]]              && DETECTED_USERNAME="$u"  || true
+    [[ "$f" != "Your Name"   ]]              && DETECTED_FULLNAME="$f"  || true
+    [[ "$e" != "your.email@example.com" ]]   && DETECTED_EMAIL="$e"    || true
+    [[ -n "$tz" && "$tz" != "UTC" ]]         && DETECTED_TIMEZONE="$tz"    || true
+    [[ -n "$lc" && "$lc" != "en_US.UTF-8" ]] && DETECTED_LOCALE="$lc"     || true
+    [[ -n "$kb" && "$kb" != "us" ]]          && DETECTED_KEYBOARD="$kb"    || true
+    [[ -n "$hw" && "$hw" != "generic" ]]     && DETECTED_HARDWARE="$hw"    || true
+    [[ -n "$wu" ]]                           && DETECTED_WINDOWS_UUID="$wu" || true
+    # preserve the entire sshHosts block (brace-counted extraction)
+    local ssh_block
+    ssh_block=$(awk '
+      /sshHosts\s*=\s*\{/ { found=1; depth=0 }
+      found {
+        for (i=1; i<=length($0); i++) {
+          c = substr($0,i,1)
+          if (c == "{") depth++
+          if (c == "}") depth--
+        }
+        print
+        if (depth == 0) exit
+      }
+    ' "$user" 2>/dev/null || true)
+    # only preserve if it has actual host entries (not just empty braces)
+    if [[ -n "$ssh_block" ]] && ! echo "$ssh_block" | grep -qP '^\s*sshHosts\s*=\s*\{\s*\}\s*;\s*$'; then
+      DETECTED_SSH_HOSTS="$ssh_block"
+    fi
   fi
 }
 
 # ============================================================
-header "NixOS FW16 Setup"
+header "NixOS Setup"
 echo -e "  ${BOLD}Version:${NC} ${GREEN}${VERSION}${NC}"
 # ============================================================
 
@@ -75,6 +105,14 @@ header "Step 1: Collect configuration values"
 
 # ── 1a. State-file shortcut (survives mid-run crashes) ────────────────────────
 if [[ -f "$STATE_FILE" ]]; then
+  # Validate ownership — /tmp is world-writable, so a non-root user could
+  # plant a malicious state file before root runs this script.
+  if [[ "$(stat -c %u "$STATE_FILE")" != "0" ]]; then
+    warn "State file not owned by root, ignoring."
+    rm -f "$STATE_FILE"
+  fi
+fi
+if [[ -f "$STATE_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$STATE_FILE"
   warn "Loaded saved values from $STATE_FILE:"
@@ -82,12 +120,18 @@ if [[ -f "$STATE_FILE" ]]; then
   echo "  Username : $SETUP_USERNAME"
   echo "  Full name: $SETUP_FULLNAME"
   echo "  Email    : $SETUP_EMAIL"
+  echo "  Timezone : ${SETUP_TIMEZONE:-}"
+  echo "  Locale   : ${SETUP_LOCALE:-}"
+  echo "  Keyboard : ${SETUP_KEYBOARD:-}"
+  echo "  Hardware : ${SETUP_HARDWARE:-}"
+  echo "  Windows  : ${SETUP_WINDOWS_UUID:-(none)}"
   echo ""
   read -rp "Use these saved values? [Y/n] " USE_SAVED
   if [[ "$USE_SAVED" =~ ^[Nn]$ ]]; then
     log "Re-entering values ..."
     rm -f "$STATE_FILE"
-    unset SETUP_HOSTNAME SETUP_USERNAME SETUP_FULLNAME SETUP_EMAIL
+    unset SETUP_HOSTNAME SETUP_USERNAME SETUP_FULLNAME SETUP_EMAIL \
+          SETUP_TIMEZONE SETUP_LOCALE SETUP_KEYBOARD SETUP_HARDWARE SETUP_WINDOWS_UUID
   else
     log "Using saved values."
   fi
@@ -102,6 +146,11 @@ if [[ -z "${SETUP_HOSTNAME:-}" ]]; then
     SETUP_USERNAME="$DETECTED_USERNAME"
     SETUP_FULLNAME="$DETECTED_FULLNAME"
     SETUP_EMAIL="$DETECTED_EMAIL"
+    [[ -n "$DETECTED_TIMEZONE" ]]     && SETUP_TIMEZONE="$DETECTED_TIMEZONE"
+    [[ -n "$DETECTED_LOCALE" ]]       && SETUP_LOCALE="$DETECTED_LOCALE"
+    [[ -n "$DETECTED_KEYBOARD" ]]     && SETUP_KEYBOARD="$DETECTED_KEYBOARD"
+    [[ -n "$DETECTED_HARDWARE" ]]     && SETUP_HARDWARE="$DETECTED_HARDWARE"
+    [[ -n "$DETECTED_WINDOWS_UUID" ]] && SETUP_WINDOWS_UUID="$DETECTED_WINDOWS_UUID"
     log "Using existing values from /etc/nixos/user.nix:"
     echo "  Hostname : $SETUP_HOSTNAME"
     echo "  Username : $SETUP_USERNAME"
@@ -148,12 +197,55 @@ if [[ -z "${SETUP_EMAIL:-}" ]]; then
     || err "Invalid email format"
 fi
 
+if [[ -z "${SETUP_TIMEZONE:-}" ]]; then
+  prompt_with_default "Timezone (e.g. Europe/Vienna, America/New_York)" "${DETECTED_TIMEZONE:-UTC}" SETUP_TIMEZONE
+  [[ -z "$SETUP_TIMEZONE" ]] && err "Timezone cannot be empty"
+fi
+
+if [[ -z "${SETUP_LOCALE:-}" ]]; then
+  prompt_with_default "Locale (e.g. en_US.UTF-8, de_AT.UTF-8)" "${DETECTED_LOCALE:-en_US.UTF-8}" SETUP_LOCALE
+  [[ -z "$SETUP_LOCALE" ]] && err "Locale cannot be empty"
+fi
+
+if [[ -z "${SETUP_KEYBOARD:-}" ]]; then
+  prompt_with_default "Keyboard layout (e.g. us, de, fr)" "${DETECTED_KEYBOARD:-us}" SETUP_KEYBOARD
+  [[ -z "$SETUP_KEYBOARD" ]] && err "Keyboard layout cannot be empty"
+fi
+
+if [[ -z "${SETUP_HARDWARE:-}" ]]; then
+  echo ""
+  echo -e "${BOLD}Hardware profile:${NC}"
+  echo "  1) framework  - Framework 16 AMD (power mgmt, fingerprint, LED matrix, suspend fixes)"
+  echo "  2) generic    - Any other machine (no hardware-specific tweaks)"
+  echo ""
+  prompt_with_default "Choose [1/2]" "${DETECTED_HARDWARE:-2}" SETUP_HARDWARE
+  case "$SETUP_HARDWARE" in
+    1|framework) SETUP_HARDWARE="framework" ;;
+    2|generic)   SETUP_HARDWARE="generic" ;;
+    *) err "Invalid choice: pick 1 (framework) or 2 (generic)" ;;
+  esac
+fi
+
+if [[ -z "${SETUP_WINDOWS_UUID+set}" ]]; then
+  echo ""
+  echo -e "${BOLD}Windows dual-boot:${NC} If you have Windows installed, enter the EFI partition UUID"
+  echo "  for a GRUB chainloader entry. Find it with: blkid | grep EFI"
+  echo "  Leave empty to skip."
+  echo ""
+  prompt_with_default "Windows EFI UUID (or empty to skip)" "${DETECTED_WINDOWS_UUID:-}" SETUP_WINDOWS_UUID
+fi
+
 # Persist to state file immediately after collection
 cat > "$STATE_FILE" <<EOF
 SETUP_HOSTNAME="$SETUP_HOSTNAME"
 SETUP_USERNAME="$SETUP_USERNAME"
 SETUP_FULLNAME="$SETUP_FULLNAME"
 SETUP_EMAIL="$SETUP_EMAIL"
+SETUP_TIMEZONE="$SETUP_TIMEZONE"
+SETUP_LOCALE="$SETUP_LOCALE"
+SETUP_KEYBOARD="$SETUP_KEYBOARD"
+SETUP_HARDWARE="$SETUP_HARDWARE"
+SETUP_WINDOWS_UUID="${SETUP_WINDOWS_UUID:-}"
 EOF
 chmod 600 "$STATE_FILE"
 log "Values saved to $STATE_FILE"
@@ -164,6 +256,11 @@ echo "  Hostname : $SETUP_HOSTNAME"
 echo "  Username : $SETUP_USERNAME"
 echo "  Full name: $SETUP_FULLNAME"
 echo "  Email    : $SETUP_EMAIL"
+echo "  Timezone : $SETUP_TIMEZONE"
+echo "  Locale   : $SETUP_LOCALE"
+echo "  Keyboard : $SETUP_KEYBOARD"
+echo "  Hardware : $SETUP_HARDWARE"
+echo "  Windows  : ${SETUP_WINDOWS_UUID:-(none)}"
 echo ""
 read -rp "Continue? [y/N] " CONFIRM
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || err "Aborted."
@@ -178,15 +275,68 @@ if [[ "$SCRIPT_DIR" != "/etc/nixos" ]]; then
   cp "$SCRIPT_DIR/configuration.nix" /etc/nixos/configuration.nix
   cp "$SCRIPT_DIR/home.nix"          /etc/nixos/home.nix
   cp "$SCRIPT_DIR/user.nix"          /etc/nixos/user.nix
+  rm -rf /etc/nixos/modules
+  cp -r "$SCRIPT_DIR/modules"        /etc/nixos/modules
+  if [[ -d "$SCRIPT_DIR/assets" ]]; then
+    rm -rf /etc/nixos/assets
+    cp -r "$SCRIPT_DIR/assets"       /etc/nixos/assets
+  fi
+  if [[ -d "$SCRIPT_DIR/scripts" ]]; then
+    rm -rf /etc/nixos/scripts
+    cp -r "$SCRIPT_DIR/scripts"      /etc/nixos/scripts
+  fi
 else
   log "Already running from /etc/nixos, skipping copy."
 fi
 
 # ============================================================
-header "Step 3: Write user.nix"
+header "Step 3: Ensure /etc/nixos is a flake-ready git repo"
 # ============================================================
+# Nix flakes only see files tracked by git. Stage placeholder files
+# first, then overwrite user.nix with real values (unstaged) so
+# personal data never enters git.
+
+if [[ ! -d /etc/nixos/.git ]]; then
+  log "Initialising git repo in /etc/nixos ..."
+  git -C /etc/nixos init
+fi
+
+# disable sparse-checkout if it got turned on (breaks git add)
+if git -C /etc/nixos config --get core.sparseCheckout &>/dev/null; then
+  git -C /etc/nixos sparse-checkout disable 2>/dev/null || true
+  git -C /etc/nixos config --unset core.sparseCheckout 2>/dev/null || true
+  git -C /etc/nixos config --unset core.sparseCheckoutCone 2>/dev/null || true
+  rm -f /etc/nixos/.git/info/sparse-checkout
+fi
+
+log "Staging config files (with placeholder user.nix) ..."
+git -C /etc/nixos add flake.nix configuration.nix home.nix user.nix modules/ assets/ scripts/ 2>/dev/null || git -C /etc/nixos add flake.nix configuration.nix home.nix user.nix modules/
+
+# ============================================================
+header "Step 4: Write user.nix with real values"
+# ============================================================
+# Overwrite the placeholder user.nix with real values.
+# This stays unstaged — Nix reads the working tree for dirty repos.
 
 log "Writing user-specific values to /etc/nixos/user.nix ..."
+
+# if no sshHosts detected from existing config, try the repo copy
+if [[ -z "${DETECTED_SSH_HOSTS:-}" ]]; then
+  repo_ssh=$(awk '
+    /sshHosts\s*=\s*\{/ { found=1; depth=0 }
+    found {
+      for (i=1; i<=length($0); i++) {
+        c = substr($0,i,1)
+        if (c == "{") depth++
+        if (c == "}") depth--
+      }
+      print
+      if (depth == 0) exit
+    }
+  ' "$SCRIPT_DIR/user.nix" 2>/dev/null || true)
+  [[ -n "$repo_ssh" ]] && DETECTED_SSH_HOSTS="$repo_ssh"
+fi
+SETUP_SSH_HOSTS="${DETECTED_SSH_HOSTS:-sshHosts = \{\};}"
 
 cat > /etc/nixos/user.nix <<EOF
 {
@@ -195,11 +345,14 @@ cat > /etc/nixos/user.nix <<EOF
   fullName = "$SETUP_FULLNAME";
   email    = "$SETUP_EMAIL";
 
-  timezone       = "Europe/Vienna";
-  locale         = "de_AT.UTF-8";
-  keyboardLayout = "de";
+  timezone       = "$SETUP_TIMEZONE";
+  locale         = "$SETUP_LOCALE";
+  keyboardLayout = "$SETUP_KEYBOARD";
 
-  sshHosts = {};
+  hardware       = "$SETUP_HARDWARE";
+  windowsEfiUuid = "${SETUP_WINDOWS_UUID:-}";
+
+  $SETUP_SSH_HOSTS
 
   defaultCalendar = "$SETUP_EMAIL";
 
@@ -207,10 +360,15 @@ cat > /etc/nixos/user.nix <<EOF
 }
 EOF
 
-log "user.nix written."
+# Prevent git from tracking local changes to user.nix (personal data protection).
+# The placeholder version stays in the commit history for flake visibility,
+# but skip-worktree ensures git status/add never picks up the real values.
+git -C /etc/nixos update-index --skip-worktree user.nix 2>/dev/null || true
+
+log "user.nix written and marked skip-worktree (personal data stays out of git)."
 
 # ============================================================
-header "Step 4: Generate hardware configuration"
+header "Step 5: Generate hardware configuration"
 # ============================================================
 
 if [[ -f /etc/nixos/hardware-configuration.nix ]]; then
@@ -221,8 +379,12 @@ else
   log "Generated."
 fi
 
+# Stage so the flake can see it (machine-specific, never pushed)
+git -C /etc/nixos add hardware-configuration.nix
+log "hardware-configuration.nix staged for flake."
+
 # ============================================================
-header "Step 5: Verify Nix is present"
+header "Step 6: Verify Nix is present"
 # ============================================================
 
 if ! nix --version &>/dev/null; then
@@ -232,7 +394,7 @@ fi
 log "Nix found: $(nix --version)"
 
 # ============================================================
-header "Step 6: Build and switch"
+header "Step 7: Build and switch"
 # ============================================================
 
 # NixOS manages users declaratively via users.users in configuration.nix.
@@ -249,7 +411,7 @@ NIX_CONFIG="experimental-features = nix-command flakes" \
   nixos-rebuild switch --flake "/etc/nixos#$SETUP_HOSTNAME"
 
 # ============================================================
-header "Step 7: Set user password"
+header "Step 8: Set user password"
 # ============================================================
 
 HOME_DIR="/home/$SETUP_USERNAME"
@@ -262,7 +424,7 @@ else
 fi
 
 # ============================================================
-header "Step 8: Create remaining home directories"
+header "Step 9: Create remaining home directories"
 # ============================================================
 
 # NOTE: .config is intentionally excluded - Home Manager owns it.
@@ -289,7 +451,7 @@ chmod 700 "$HOME_DIR/.ssh"
 log "Ownership and permissions set."
 
 # ============================================================
-header "Step 9: Generate SSH key"
+header "Step 10: Generate SSH key"
 # ============================================================
 
 SSH_KEY="$HOME_DIR/.ssh/id_ed25519"

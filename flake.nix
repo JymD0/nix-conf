@@ -1,5 +1,5 @@
 {
-  description = "FW16 NixOS configuration";
+  description = "NixOS configuration";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -20,28 +20,35 @@
       url = "github:sadjow/claude-code-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    claude-desktop = {
+      url = "github:k3d3/claude-desktop-linux-flake";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
   };
 
-  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, ... }:
+  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, claude-desktop, ... }:
   let
     user = import ./user.nix;
   in {
     nixosConfigurations.${user.hostname} = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit user zen-browser claude-code; };
+      specialArgs = { inherit user zen-browser claude-code claude-desktop; };
       modules = [
-        # Framework 16 AMD hardware support
-        nixos-hardware.nixosModules.framework-16-7040-amd
-
         ./configuration.nix
 
         home-manager.nixosModules.home-manager
         {
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
-          home-manager.extraSpecialArgs = { inherit user claude-code; };
-          home-manager.users.${user.username} = import ./home.nix;
+          home-manager.extraSpecialArgs = { inherit user claude-code claude-desktop; };
+          home-manager.users.${user.username} = {
+            imports = [ ./home.nix ];
+          };
         }
+      ] ++ nixpkgs.lib.optionals (user.hardware == "framework") [
+        nixos-hardware.nixosModules.framework-16-7040-amd
       ];
     };
   };

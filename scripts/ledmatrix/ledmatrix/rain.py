@@ -3,7 +3,7 @@ import math
 import os
 import random
 import time
-from ledmatrix import Matrix, ROWS, COLS
+from ledmatrix import Matrix, ROWS, COLS, PRIO_IDLE, claim
 
 
 def _make_column():
@@ -46,13 +46,16 @@ def main():
         f.write(str(os.getpid()))
 
     try:
-        columns = [_make_column() for _ in range(COLS)]
-        for col in columns:
-            col["pos"] = random.uniform(-ROWS, ROWS)
-        while True:
-            _build_rain_frame(columns).send(args.dev)
-            _step_columns(columns)
-            time.sleep(0.04)
+        with claim(PRIO_IDLE) as acquired:
+            if not acquired:
+                return
+            columns = [_make_column() for _ in range(COLS)]
+            for col in columns:
+                col["pos"] = random.uniform(-ROWS, ROWS)
+            while True:
+                _build_rain_frame(columns).send(args.dev)
+                _step_columns(columns)
+                time.sleep(0.04)
     finally:
         try:
             os.unlink(pid_file)

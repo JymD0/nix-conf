@@ -1,6 +1,6 @@
 import argparse
 import time
-from ledmatrix import Matrix, ROWS, COLS
+from ledmatrix import Matrix, ROWS, COLS, PRIO_SYSTEM, claim
 
 # 7 wide x 28 tall rect centered on portrait 9x34 display
 _RECT_R = 3   # (34 - 28) // 2
@@ -82,7 +82,10 @@ def main():
     parser.add_argument("action", choices=["connect", "disconnect"])
     parser.add_argument("--dev", default="/dev/ttyACM0")
     args = parser.parse_args()
-    if args.action == "connect":
-        _connect(args.dev)
-    else:
-        _disconnect(args.dev)
+    with claim(PRIO_SYSTEM) as acquired:
+        if not acquired:
+            return
+        if args.action == "connect":
+            _connect(args.dev)
+        else:
+            _disconnect(args.dev)

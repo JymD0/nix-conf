@@ -1,7 +1,7 @@
 import argparse
 import math
 import time
-from ledmatrix import Matrix, ROWS, COLS
+from ledmatrix import Matrix, ROWS, COLS, PRIO_SYSTEM, claim
 
 
 def _arc_pixels(origin_r, origin_c, radius):
@@ -53,9 +53,12 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "wifi":
-        origin_r, origin_c = 0, 4   # top edge, horizontal center
+        origin_r, origin_c = ROWS - 1, 4  # bottom edge, horizontal center
     else:
         origin_r, origin_c = 17, 4  # vertical center
 
-    radii = [4, 8, 12, 16]
-    _animate_arcs(args.dev, radii, origin_r, origin_c, reverse=(args.direction == "down"))
+    radii = [4, 8, 12, 16, 20, 24, 28, 34]
+    with claim(PRIO_SYSTEM) as acquired:
+        if not acquired:
+            return
+        _animate_arcs(args.dev, radii, origin_r, origin_c, reverse=(args.direction == "down"))

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "computer-use"
+version = "0.1.0"
+dependencies = ["mcp", "Pillow", "PyGObject"]
+
+[project.scripts]
+computer-use-server = "computer_use.server:main"
+computer-use-overlay = "computer_use.overlay:main"
+computer-use-toggle = "computer_use.toggle:main"
