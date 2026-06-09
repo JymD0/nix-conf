@@ -66,6 +66,26 @@ let
     done
   '';
 
+  # Duplicate the focused window; for kitty, open in the same working directory
+  duplicateWindow = pkgs.writeShellScript "duplicate-window" ''
+    set -euo pipefail
+    win=$(hyprctl activewindow -j)
+    class=$(echo "$win" | jq -r '.class // empty')
+    pid=$(echo "$win" | jq -r '.pid // empty')
+    [ -z "$class" ] || [ -z "$pid" ] && exit 0
+
+    if [ "$class" = "kitty" ]; then
+      cwd=$({ kitty @ --to "unix:/tmp/kitty-$pid" ls 2>/dev/null || true; } \
+        | jq -r '.[] | .tabs[] | select(.is_focused) | .windows[] | select(.is_focused) | .cwd // empty' \
+        | head -1)
+      [ -z "$cwd" ] && cwd="$HOME"
+      kitty --working-directory "$cwd" &
+    else
+      exe=$(readlink -f /proc/$pid/exe 2>/dev/null || true)
+      [ -n "$exe" ] && "$exe" &
+    fi
+  '';
+
   # Fuzzel picker for LED matrix — games enter submap, display modes exit immediately
   ledmatrixMenu = pkgs.writeShellScript "ledmatrix-menu" ''
     set -euo pipefail
@@ -73,7 +93,7 @@ let
     FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
     IC="inputmodule-control --serial-dev $DEV led-matrix"
 
-    choice=$(printf "Snake\nPong\nGame of Life\nWeather\nMood\nText\nScroll\nFire\nPlasma\nRain\nMetaballs\nStarfield\nStop" | $FUZZEL --dmenu --prompt "LED Matrix  " || true)
+    choice=$(printf "Snake\nPong\nGame of Life\nWeather\nMood\nText\nScroll\nRain\nEKG\nCells\nBounce\nCascade\nSpiral\nScan\nStop" | $FUZZEL --dmenu --prompt "LED Matrix  " || true)
     [ -z "$choice" ] && exit 0
 
     case "$choice" in
@@ -132,7 +152,7 @@ let
       Scroll)
         t=$(printf "" | $FUZZEL --dmenu --prompt "Scroll text: " || true)
         [ -z "$t" ] && exit 0
-        for _f in fire plasma rain metaballs starfield scroll; do
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
           if [ -f "$_pf" ]; then
             _pid=$(cat "$_pf")
@@ -144,34 +164,8 @@ let
         exit 0
         ;;
 
-      Fire)
-        for _f in fire plasma rain metaballs starfield scroll; do
-          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          if [ -f "$_pf" ]; then
-            _pid=$(cat "$_pf")
-            pkill -P "$_pid" 2>/dev/null || true
-            kill "$_pid" 2>/dev/null || true
-          fi
-        done
-        ledmatrix-fire --dev "$DEV" &
-        exit 0
-        ;;
-
-      Plasma)
-        for _f in fire plasma rain metaballs starfield scroll; do
-          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
-          if [ -f "$_pf" ]; then
-            _pid=$(cat "$_pf")
-            pkill -P "$_pid" 2>/dev/null || true
-            kill "$_pid" 2>/dev/null || true
-          fi
-        done
-        ledmatrix-plasma --dev "$DEV" &
-        exit 0
-        ;;
-
       Rain)
-        for _f in fire plasma rain metaballs starfield scroll; do
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
           if [ -f "$_pf" ]; then
             _pid=$(cat "$_pf")
@@ -183,8 +177,8 @@ let
         exit 0
         ;;
 
-      Metaballs)
-        for _f in fire plasma rain metaballs starfield scroll; do
+      EKG)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
           if [ -f "$_pf" ]; then
             _pid=$(cat "$_pf")
@@ -192,12 +186,12 @@ let
             kill "$_pid" 2>/dev/null || true
           fi
         done
-        ledmatrix-metaballs --dev "$DEV" &
+        ledmatrix-ekg --dev "$DEV" &
         exit 0
         ;;
 
-      Starfield)
-        for _f in fire plasma rain metaballs starfield scroll; do
+      Cells)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
           if [ -f "$_pf" ]; then
             _pid=$(cat "$_pf")
@@ -205,12 +199,64 @@ let
             kill "$_pid" 2>/dev/null || true
           fi
         done
-        ledmatrix-starfield --dev "$DEV" &
+        ledmatrix-automaton --dev "$DEV" &
+        exit 0
+        ;;
+
+      Bounce)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
+          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
+        done
+        ledmatrix-bounce --dev "$DEV" &
+        exit 0
+        ;;
+
+      Cascade)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
+          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
+        done
+        ledmatrix-cascade --dev "$DEV" &
+        exit 0
+        ;;
+
+      Spiral)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
+          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
+        done
+        ledmatrix-spiral --dev "$DEV" &
+        exit 0
+        ;;
+
+      Scan)
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
+          _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
+          if [ -f "$_pf" ]; then
+            _pid=$(cat "$_pf")
+            pkill -P "$_pid" 2>/dev/null || true
+            kill "$_pid" 2>/dev/null || true
+          fi
+        done
+        ledmatrix-scan --dev "$DEV" &
         exit 0
         ;;
 
       Stop)
-        for _f in fire plasma rain metaballs starfield scroll; do
+        for _f in rain ekg automaton bounce cascade spiral scan scroll; do
           _pf="''${XDG_RUNTIME_DIR:-/tmp}/ledmatrix-$_f.pid"
           if [ -f "$_pf" ]; then
             _pid=$(cat "$_pf")
@@ -224,188 +270,6 @@ let
       *)    exit 0 ;;
     esac
     hyprctl dispatch submap ledmatrix
-  '';
-
-  paletteWebSearch = pkgs.writeShellScript "palette-web-search" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    query="''${1:-}"
-    if [ -z "$query" ]; then
-      query=$(printf "search the web..." | $FUZZEL --dmenu --prompt "Search  " || true)
-      [ "$query" = "search the web..." ] && exit 0
-    fi
-    [ -z "$query" ] && exit 0
-    encoded=$(printf '%s' "$query" | ${pkgs.jq}/bin/jq -Rr @uri)
-    ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
-  '';
-
-  paletteSSH = pkgs.writeShellScript "palette-ssh" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    filter="''${1:-}"
-    hosts=$(grep -i "^Host " "$HOME/.ssh/config" 2>/dev/null | awk '{print $2}' | grep -v '[*?]' || true)
-    [ -z "$hosts" ] && exit 0
-    if [ -n "$filter" ]; then
-      hosts=$(printf '%s' "$hosts" | grep -i "$filter" || true)
-      [ -z "$hosts" ] && exit 0
-    fi
-    host=$(printf '%s' "$hosts" | $FUZZEL --dmenu --prompt "SSH  " || true)
-    [ -z "$host" ] && exit 0
-    ${pkgs.kitty}/bin/kitty -e ssh "$host"
-  '';
-
-  paletteFiles = pkgs.writeShellScript "palette-files" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    query="''${1:-.}"
-    results=$(${pkgs.fd}/bin/fd "$query" "$HOME" --max-results 50 2>/dev/null || true)
-    [ -z "$results" ] && exit 0
-    file=$(printf '%s' "$results" | $FUZZEL --dmenu --prompt "Open  " || true)
-    [ -z "$file" ] && exit 0
-    ${pkgs.xdg-utils}/bin/xdg-open "$file"
-  '';
-
-  paletteProcessKiller = pkgs.writeShellScript "palette-process-killer" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    filter="''${1:-}"
-    procs=$(ps -eo pid,comm,args --no-headers | grep -v "^ *$$ ")
-    if [ -n "$filter" ]; then
-      procs=$(printf '%s' "$procs" | grep -i "$filter" || true)
-    fi
-    [ -z "$procs" ] && exit 0
-    sel=$(printf '%s' "$procs" | $FUZZEL --dmenu --prompt "Kill  " || true)
-    [ -z "$sel" ] && exit 0
-    pid=$(printf '%s' "$sel" | awk '{print $1}')
-    kill "$pid" 2>/dev/null || true
-    ${pkgs.libnotify}/bin/notify-send "Killed" "PID $pid" -t 2000
-  '';
-
-  paletteColorPicker = pkgs.writeShellScript "palette-color-picker" ''
-    set -euo pipefail
-    color=$(${pkgs.hyprpicker}/bin/hyprpicker 2>/dev/null || true)
-    [ -z "$color" ] && exit 0
-    printf '%s' "$color" | ${pkgs.wl-clipboard}/bin/wl-copy
-    ${pkgs.libnotify}/bin/notify-send "Color copied" "$color" -t 2000
-  '';
-
-  paletteWifi = pkgs.writeShellScript "palette-wifi" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    NMCLI="${pkgs.networkmanager}/bin/nmcli"
-    networks=$($NMCLI -t -f SSID device wifi list 2>/dev/null | sort -u | grep -v '^--$' | grep -v '^$' || true)
-    [ -z "$networks" ] && exit 0
-    ssid=$(printf '%s' "$networks" | $FUZZEL --dmenu --prompt "WiFi  " || true)
-    [ -z "$ssid" ] && exit 0
-    $NMCLI device wifi connect "$ssid" \
-      && ${pkgs.libnotify}/bin/notify-send "WiFi" "Connecting to $ssid" -t 3000 \
-      || ${pkgs.libnotify}/bin/notify-send "WiFi" "Failed to connect to $ssid" -u normal -t 4000
-  '';
-
-  palettePass = pkgs.writeShellScript "palette-pass" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    STORE="$HOME/.password-store"
-    if [ ! -d "$STORE" ]; then
-      ${pkgs.libnotify}/bin/notify-send "pass" "No password store found" -t 3000
-      exit 0
-    fi
-    entries=$(${pkgs.findutils}/bin/find "$STORE" -name "*.gpg" | ${pkgs.gnused}/bin/sed "s|$STORE/||;s|\.gpg$||" | ${pkgs.coreutils}/bin/sort || true)
-    [ -z "$entries" ] && exit 0
-    entry=$(printf '%s' "$entries" | $FUZZEL --dmenu --prompt "Pass  " || true)
-    [ -z "$entry" ] && exit 0
-    ${pkgs.pass}/bin/pass show -c "$entry"
-  '';
-
-  palettePower = pkgs.writeShellScript "palette-power" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    choice=$(printf "Shutdown\nReboot\nSuspend\nLogout\nLock" | $FUZZEL --dmenu --prompt "Power  " || true)
-    [ -z "$choice" ] && exit 0
-    case "$choice" in
-      Shutdown) systemctl poweroff ;;
-      Reboot)   systemctl reboot ;;
-      Suspend)  systemctl suspend ;;
-      Logout)   hyprctl dispatch exit ;;
-      Lock)     ${pkgs.hyprlock}/bin/hyprlock ;;
-    esac
-  '';
-
-  paletteCalc = pkgs.writeShellScript "palette-calc" ''
-    set -euo pipefail
-    expr="$*"
-    result=$(${pkgs.libqalculate}/bin/qalc -t "$expr" 2>/dev/null | tail -1 || echo "error")
-    printf '%s' "$result" | ${pkgs.wl-clipboard}/bin/wl-copy
-    ${pkgs.libnotify}/bin/notify-send "= $result" "$expr" -t 4000
-  '';
-
-  palette = pkgs.writeShellScript "palette" ''
-    set -euo pipefail
-    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
-    NMCLI="${pkgs.networkmanager}/bin/nmcli"
-
-    items=$(
-      printf "shutdown\nreboot\nsuspend\nlogout\nlock\n"
-      printf "emoji\ncolor\nled\n"
-      $NMCLI -t -f SSID device wifi list --rescan no 2>/dev/null \
-        | sort -u | grep -v '^--$' | grep -v '^$' | sed 's/^/wifi  /' || true
-      grep -i "^Host " "$HOME/.ssh/config" 2>/dev/null \
-        | awk '{print $2}' | grep -v '[*?]' | sed 's/^/ssh  /' || true
-      ps -eo comm,pid --no-headers 2>/dev/null \
-        | sort -u | head -50 | awk '{printf "kill  %s (%s)\n", $1, $2}' || true
-      if [ -d "$HOME/.password-store" ]; then
-        ${pkgs.findutils}/bin/find "$HOME/.password-store" -name "*.gpg" \
-          | sed "s|$HOME/.password-store/||;s|\.gpg$||" | sort | sed 's/^/pass  /' || true
-      fi
-    )
-
-    sel=$(printf '%s' "$items" | $FUZZEL --dmenu --prompt "  " || true)
-    [ -z "$sel" ] && exit 0
-
-    case "$sel" in
-      shutdown) systemctl poweroff ;;
-      reboot)   systemctl reboot ;;
-      suspend)  systemctl suspend ;;
-      logout)   hyprctl dispatch exit ;;
-      lock)     ${pkgs.hyprlock}/bin/hyprlock ;;
-      emoji)    ${pkgs.bemoji}/bin/bemoji -t ;;
-      color)
-        c=$(${pkgs.hyprpicker}/bin/hyprpicker 2>/dev/null || true)
-        [ -z "$c" ] && exit 0
-        printf '%s' "$c" | ${pkgs.wl-clipboard}/bin/wl-copy
-        ${pkgs.libnotify}/bin/notify-send "Color" "$c" -t 2000
-        ;;
-      led) ${ledmatrixMenu} ;;
-      "wifi  "*)
-        ssid="''${sel#wifi  }"
-        $NMCLI device wifi connect "$ssid" \
-          && ${pkgs.libnotify}/bin/notify-send "WiFi" "Connecting to $ssid" -t 3000 \
-          || ${pkgs.libnotify}/bin/notify-send "WiFi" "Failed to connect" -u normal -t 4000
-        ;;
-      "ssh  "*)
-        host="''${sel#ssh  }"
-        ${pkgs.kitty}/bin/kitty -e ssh "$host"
-        ;;
-      "kill  "*)
-        pid=$(printf '%s' "$sel" | grep -oE '\([0-9]+\)$' | tr -d '()')
-        kill "$pid" 2>/dev/null || true
-        ${pkgs.libnotify}/bin/notify-send "Killed" "''${sel#kill  }" -t 2000
-        ;;
-      "pass  "*)
-        entry="''${sel#pass  }"
-        ${pkgs.pass}/bin/pass show -c "$entry"
-        ;;
-      *)
-        if printf '%s' "$sel" | grep -qE '^[0-9]+\.?[0-9]*[[:space:]]+[^[:space:]]+[[:space:]]+to[[:space:]]+[^[:space:]]+$'; then
-          ${paletteCalc} "$sel"
-        elif printf '%s' "$sel" | grep -qE '^[0-9(]' && printf '%s' "$sel" | grep -qE '[+*/^%]|[0-9]-[0-9]'; then
-          ${paletteCalc} "$sel"
-        else
-          encoded=$(printf '%s' "$sel" | ${pkgs.jq}/bin/jq -Rr @uri)
-          ${pkgs.xdg-utils}/bin/xdg-open "https://www.google.com/search?q=$encoded"
-        fi
-        ;;
-    esac
   '';
 
 in
@@ -423,9 +287,8 @@ in
 
       exec-once = [
         "waybar"
-        "hyprlock"
+        "hyprlock-led"
         "mkdir -p ~/.ssh/sockets" # for SSH ControlMaster multiplexing
-        "gnome-keyring-daemon --start --components=secrets,ssh"
         "swww-daemon"
         "variety"
         "wl-paste --type text --watch cliphist store"
@@ -441,6 +304,9 @@ in
         "TERMINAL,kitty"
         "AQ_MGPU_NO_EXPLICIT,1" # Workaround for eglDupNativeFenceFDANDROID crash on AMD Phoenix iGPU (#9746)
         "AQ_NO_ATOMIC,1"        # Disable atomic modesetting to prevent GPU fence crashes
+        "GTK_A11Y,atspi"            # expose GTK4 accessibility tree via AT-SPI2
+        "QT_ACCESSIBILITY,1"        # expose Qt accessibility tree via AT-SPI2
+        "GNOME_ACCESSIBILITY,1"     # expose Firefox/Zen accessibility tree via AT-SPI2
       ];
 
       input = {
@@ -452,6 +318,13 @@ in
           natural_scroll = true;
           disable_while_typing = true;
         };
+      };
+
+      # flat accel for ydotool so absolute mouse moves land at correct coordinates
+      device = {
+        name = "ydotoold-virtual-device-1";
+        accel_profile = "flat";
+        sensitivity = 0;
       };
 
       cursor = {
@@ -534,14 +407,12 @@ in
       "$mod" = "SUPER";
 
       bind = [
-        # Palette
-        "$mod, space, exec, ${palette}"
-        # Keyboard layout (DE ↔ Colemak-DH, moved from Super+Space)
+        "$mod, space, exec, walker"
+        # Keyboard layout (DE ↔ Colemak-DH)
         "$mod SHIFT, space, exec, hyprctl switchxkblayout all next"
-        "$mod SHIFT, P, exec, ${palettePower}"
-        "$mod SHIFT, W, exec, ${paletteWifi}"
 
         "$mod, Q, exec, kitty"
+        "$mod, D, exec, ${duplicateWindow}"
         "$mod, C, killactive,"
         "$mod, M, exit,"
         "$mod, E, exec, nemo"
@@ -565,6 +436,9 @@ in
         ''$mod, PRINT,   exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
         ''$mod SHIFT, PRINT, exec, bash -c 'F=~/Pictures/Screenshots/$(date +%Y%m%d_%H%M%S).png; mkdir -p ~/Pictures/Screenshots; grim -g "$(hyprctl -j activewindow | jq -r '\"\\(.at[0]),\\(.at[1]) \\(.size[0])x\\(.size[1])\"')" "$F" && wl-copy < "$F" && { A=$(notify-send -a "Screenshot" -i "$F" "Screenshot saved" "$F" --action=default=Open) && [ "$A" = "default" ] && satty -f "$F"; } &' ''
 
+        # toggle computer use abort (lock file + overlay socket notification)
+        "$mod, Escape, exec, computer-use-toggle"
+
         "$mod, X, togglefloating,"
         "$mod, Period, exec, bemoji -t"
         "$mod ALT, G, exec, ${ledmatrixMenu}"
@@ -578,7 +452,7 @@ in
         # Scratchpad terminal — toggle with Super+- (respawn if closed)
         "$mod, minus, exec, bash -c 'if hyprctl clients -j | jq -e \".[].class\" | grep -q scratchpad; then hyprctl dispatch togglespecialworkspace scratchpad; else kitty --class scratchpad; fi'"
 
-        "$mod, Escape, exec, hyprlock"
+        "$mod, L, exec, hyprlock-led"
         "$mod SHIFT, V, centerwindow,"
 
         "$mod, left,  movefocus, l"
@@ -588,7 +462,6 @@ in
         "$mod, H, movefocus, l"
         "$mod, J, movefocus, d"
         "$mod, K, movefocus, u"
-        "$mod, L, movefocus, r"
 
         "$mod SHIFT, left,  movewindow, l"
         "$mod SHIFT, right, movewindow, r"
@@ -597,7 +470,6 @@ in
         "$mod SHIFT, H, movewindow, l"
         "$mod SHIFT, J, movewindow, d"
         "$mod SHIFT, K, movewindow, u"
-        "$mod SHIFT, L, movewindow, r"
 
         "$mod, 1, workspace, 1"
         "$mod, 2, workspace, 2"
@@ -633,7 +505,6 @@ in
         "$mod CTRL, H, resizeactive, -20 0"
         "$mod CTRL, J, resizeactive, 0 20"
         "$mod CTRL, K, resizeactive, 0 -20"
-        "$mod CTRL, L, resizeactive, 20 0"
       ];
 
       bindm = [
@@ -672,4 +543,30 @@ in
       submap = reset
     '';
   };
+
+  # Tools menu — lives here so it can reference ledmatrixMenu's store path
+  xdg.configFile."elephant/menus/tools.toml".text = ''
+    name = "tools"
+    name_pretty = "Tools"
+
+    [[entries]]
+    text = "Color Picker"
+    keywords = ["color", "eyedropper", "hex", "pick"]
+    actions = { run = "sh -c 'c=$(hyprpicker); [ -n \"$c\" ] && printf \"%s\" \"$c\" | wl-copy && notify-send Color \"$c\" -t 2000'" }
+
+    [[entries]]
+    text = "Emoji Picker"
+    keywords = ["emoji", "emoticon", "sticker"]
+    actions = { run = "bemoji -t" }
+
+    [[entries]]
+    text = "Sunshine"
+    keywords = ["sunshine", "remote", "stream", "moonlight"]
+    actions = { run = "xdg-open https://localhost:47990" }
+
+    [[entries]]
+    text = "LED Matrix"
+    keywords = ["led", "matrix", "animation", "effects"]
+    actions = { run = "${ledmatrixMenu}" }
+  '';
 }
