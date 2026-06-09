@@ -1,59 +1,61 @@
-{ config, pkgs, lib, user, zen-browser, ... }:
+{ config, lib, pkgs, user, zen-browser, ... }:
 
 let
-  eppOnBattery = pkgs.writeShellScript "epp-on-battery" ''
-    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
-      echo power > "$f"
-    done
-  '';
-  eppOnAC = pkgs.writeShellScript "epp-on-ac" ''
-    for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
-      echo balanced_performance > "$f"
-    done
-  '';
+  grubTheme =
+    let
+      base = pkgs.fetchFromGitHub {
+        owner = "dracula";
+        repo = "grub";
+        rev = "0e721d99dbf0d5d6c4fd489b88248365b7a60d12";
+        hash = "sha256-SBAXGJbNYdr89FSlqzgkiW/c23yTHYvNxxU8F1hMfXI=";
+      } + "/dracula";
+    in
+    pkgs.runCommand "grub-theme-patched" { } ''
+      cp -r ${base} $out
+      chmod -R u+w $out
+      cp ${./assets/grub-logo.png} $out/logo.png
+      sed -i '/desktop-image-scale-method/d' $out/theme.txt
+      substituteInPlace $out/theme.txt \
+        --replace-fail "left = 50%-50" "left = 50%-480" \
+        --replace-fail "top = 50%-50" "top = 25%"
+    '';
 
 in
 
 {
-  imports = [ ./hardware-configuration.nix ];
+  imports = [
+    ./hardware-configuration.nix
+  ] ++ lib.optionals (user.hardware == "framework") [
+    ./modules/hardware/fw16.nix
+  ];
 
   # Allow unfree packages (VS Code, Discord, etc.)
   nixpkgs.config.allowUnfree = true;
 
   # Bootloader
-  boot.loader.systemd-boot.enable = true;
-  boot.loader.systemd-boot.configurationLimit = 5;
+  boot.loader.grub = {
+    enable = true;
+    efiSupport = true;
+    device = "nodev";
+    configurationLimit = 1;
+    theme = grubTheme;
+    splashImage = null;
+    extraEntries = lib.optionalString (user.windowsEfiUuid != "") ''
+      menuentry "Windows" {
+        insmod part_gpt
+        insmod fat
+        insmod chain
+        search --no-floppy --fs-uuid --set=root ${user.windowsEfiUuid}
+        chainloader /EFI/Microsoft/Boot/bootmgfw.efi
+      }
+    '';
+  };
   boot.loader.efi.canTouchEfiVariables = true;
-
-  # Latest kernel for best FW16 support
-  boot.kernelPackages = pkgs.linuxPackages_latest;
-
-  # Framework-specific tweaks
-  boot.kernelParams = [
-    "amdgpu.abmlevel=0"      # Better color accuracy
-    "amd_pstate=active"      # AMD P-State EPP — more efficient CPU power management
-    "mem_sleep_default=deep" # S3 deep sleep — much lower suspend power draw
-    # Hibernate resume — offset found via: filefrag -v /swapfile | awk 'NR==4{print $4}' | tr -d '.'
-    "resume_offset=5408768"
-  ];
-
-  boot.resumeDevice = "/dev/nvme0n1p5";
-
-  # Prevent wake in backpack
-  services.udev.extraRules = lib.mkAfter ''
-    SUBSYSTEM=="usb", DRIVERS=="usb", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0012", ATTR{power/wakeup}="disabled"
-    SUBSYSTEM=="usb", DRIVERS=="usb", ATTRS{idVendor}=="32ac", ATTRS{idProduct}=="0014", ATTR{power/wakeup}="disabled"
-
-    # EPP: prefer efficiency on battery, balanced-performance on AC
-    SUBSYSTEM=="power_supply", ATTR{online}=="0", RUN+="${eppOnBattery}"
-    SUBSYSTEM=="power_supply", ATTR{online}=="1", RUN+="${eppOnAC}"
-
-  '';
+  boot.kernelParams = [ "logo.nologo" ];
 
   # Hostname
   networking.hostName = user.hostname;
   networking.networkmanager.enable = true;
-  networking.networkmanager.wifi.powersave = false; # disabled — causes reconnect failures after suspend on MT7922
 
   # Time zone & locale (English language, Austrian region)
   time.timeZone = user.timezone;
@@ -70,10 +72,10 @@ in
     LC_TIME = user.locale;
   };
 
-  # Keyboard layout (system-wide, German)
+  # Keyboard layouts (system-wide: German + Colemak-DH ISO)
   services.xserver.xkb = {
-    layout = user.keyboardLayout;
-    variant = "";
+    layout = "${user.keyboardLayout},us";
+    variant = ",colemak_dh_iso";
   };
   console.keyMap = user.keyboardLayout;
 
@@ -87,96 +89,30 @@ in
     jack.enable = true; # needed by OBS audio
   };
 
-  # Reduce microphone gain to prevent clipping/noise on Framework 16
-  # ALC295 internal mic defaults to max boost (+30dB) and max capture (+29.5dB),
-  # which causes constant static and clipping. Lower both at the ALSA level.
-  services.pipewire.wireplumber.extraConfig."99-mic-gain" = {
-    "monitor.alsa.rules" = [
-      {
-        matches = [{ "node.name" = "~alsa_input.*"; }];
-        actions.update-props = {
-          "node.volume" = 0.4;
-        };
-      }
-    ];
-  };
-
-  # Fix ALSA-level mic gain: reduce Mic Boost from +30dB to +10dB
-  # and Capture Volume from max (63) to 25 to eliminate static/clipping
-  systemd.services.fix-mic-gain = {
-    description = "Set sane ALSA mic gain for ALC295";
-    after = [ "sound.target" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      ExecStart = let
-        amixer = "${pkgs.alsa-utils}/bin/amixer";
-      in pkgs.writeShellScript "fix-mic-gain" ''
-        # Mic Boost: 1 out of 3 = +10dB (default 3 = +30dB)
-        ${amixer} -c 1 sset 'Mic Boost' 1
-        # Capture Volume: 25 out of 63 (~-11dB, default 63 = +29.5dB)
-        ${amixer} -c 1 sset 'Capture' 25
-      '';
-    };
-  };
-
   # Bluetooth
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;
 
-  # Fingerprint reader
-  services.fprintd.enable = true;
-
-  # PAM for hyprlock — fingerprint is handled natively by hyprlock via D-Bus,
-  # so disable fprintAuth in PAM to avoid blocking the password path.
-  security.pam.services.hyprlock = {
-    fprintAuth = false;
-  };
-
   # i2c access for ddcutil (external monitor brightness via DDC/CI)
   hardware.i2c.enable = true;
 
-  # Power management (critical for laptop battery life)
-  services.power-profiles-daemon.enable = true;
-  powerManagement.powertop.enable = false; # disabled — conflicts with power-profiles-daemon and causes USB HID autosuspend lag
-
-  # Swapfile required for hibernate — must be >= RAM size (32 GB)
-  swapDevices = [{
-    device = "/swapfile";
-    size = 32768; # MB
-  }];
-
-  # Hibernate after 30min of suspend (requires swap >= RAM size)
-  systemd.sleep.settings.Sleep = {
-    HibernateDelaySec = "30m";
+  # Sunshine — remote desktop streaming (use Moonlight client on Windows)
+  services.sunshine = {
+    enable = true;
+    autoStart = true;
+    openFirewall = true;
+    capSysAdmin = true; # needed for Wayland screen capture
   };
 
-  # Lid switch: suspend-then-hibernate on battery, lock when plugged in
-  services.logind.settings.Login = {
-    HandleLidSwitch = "suspend-then-hibernate";
-    HandleLidSwitchExternalPower = "lock";
-  };
+  # uinput device needed for Sunshine's virtual keyboard/mouse/gamepad input
+  hardware.uinput.enable = true;
 
-  # Fix WiFi and touchpad not working after suspend/resume
-  # Framework 16 AMD: mt7921e (WiFi) and i2c_hid_acpi (touchpad) need
-  # to be reloaded after S3 resume to reinitialize properly.
-  systemd.services.post-resume-fix = {
-    description = "Reload WiFi and touchpad drivers after resume";
-    after = [ "suspend.target" "hibernate.target" "suspend-then-hibernate.target" ];
-    wantedBy = [ "suspend.target" "hibernate.target" "suspend-then-hibernate.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = pkgs.writeShellScript "post-resume-fix" ''
-        # Reload WiFi driver (MediaTek MT7922 / mt7921e)
-        ${pkgs.kmod}/bin/modprobe -r mt7921e && ${pkgs.kmod}/bin/modprobe mt7921e
-        # Reload touchpad driver (I2C HID)
-        ${pkgs.kmod}/bin/modprobe -r i2c_hid_acpi && ${pkgs.kmod}/bin/modprobe i2c_hid_acpi
-      '';
-    };
+  # Steam
+  programs.steam = {
+    enable = true;
+    remotePlay.openFirewall = true;
+    dedicatedServer.openFirewall = true;
   };
-  # Firmware updates (Framework ships updates via fwupd)
-  services.fwupd.enable = true;
 
   # Hyprland
   programs.hyprland = {
@@ -186,7 +122,8 @@ in
   };
 
   # Set keyboard layout for Hyprland (Wayland)
-  environment.sessionVariables.XKB_DEFAULT_LAYOUT = user.keyboardLayout;
+  environment.sessionVariables.XKB_DEFAULT_LAYOUT = "${user.keyboardLayout},us";
+  environment.sessionVariables.XKB_DEFAULT_VARIANT = ",colemak_dh_iso";
 
   # Auto-login via greetd — hyprlock handles authentication on startup
   services.greetd = {
@@ -196,7 +133,6 @@ in
       user = user.username;
     };
   };
-
 
   # Firewall
   networking.firewall = {
@@ -225,7 +161,12 @@ in
   # SSH — GNOME Keyring acts as the SSH agent (auto-unlocks keys at login)
   programs.ssh.startAgent = false; # disabled — gnome-keyring-daemon provides the agent
   services.gnome.gnome-keyring.enable = true;
-  security.pam.services.greetd.enableGnomeKeyring = true; # unlock keyring on login
+  security.pam.services.greetd.enableGnomeKeyring = false; # auto-login skips PAM password, so this just creates an empty locked login keyring
+  # hyprlock handles fingerprint auth itself via D-Bus, so disable pam_fprintd
+  # in its PAM stack to avoid blocking password auth while fprintd waits for a scan
+  security.pam.services.hyprlock = {
+    fprintAuth = false;
+  };
 
   # Enable flakes
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
@@ -248,12 +189,13 @@ in
 
   # User account
   programs.zsh.enable = true;
+  programs.ydotool.enable = true; # uinput daemon for mouse click/scroll automation
 
   users.users.${user.username} = {
     isNormalUser = true;
     description = user.fullName;
     shell = pkgs.zsh;
-    extraGroups = [ "networkmanager" "wheel" "video" "audio" "i2c" "docker" "dialout" ];
+    extraGroups = [ "networkmanager" "wheel" "video" "audio" "i2c" "docker" "dialout" "input" "ydotool" ];
   };
 
   # XDG portals — required for screensharing and file pickers under Hyprland
