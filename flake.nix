@@ -21,20 +21,16 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    claude-desktop = {
-      url = "github:k3d3/claude-desktop-linux-flake";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
 
   };
 
-  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, claude-desktop, ... }:
+  outputs = { self, nixpkgs, nixos-hardware, home-manager, zen-browser, claude-code, ... }:
   let
     user = import ./user.nix;
   in {
     nixosConfigurations.${user.hostname} = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit user zen-browser claude-code claude-desktop; };
+      specialArgs = { inherit user zen-browser claude-code; };
       modules = [
         ./configuration.nix
 
@@ -42,7 +38,7 @@
         {
           home-manager.useGlobalPkgs = true;
           home-manager.useUserPackages = true;
-          home-manager.extraSpecialArgs = { inherit user claude-code claude-desktop; };
+          home-manager.extraSpecialArgs = { inherit user claude-code; };
           home-manager.users.${user.username} = {
             imports = [ ./home.nix ];
           };

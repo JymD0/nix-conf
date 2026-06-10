@@ -10,7 +10,7 @@ let
             sleep 1
             WP="$HOME/.current-wallpaper"
             if [ -L "$WP" ]; then
-              ${pkgs.swww}/bin/swww img "$(readlink -f "$WP")" \
+              ${pkgs.awww}/bin/awww img "$(readlink -f "$WP")" \
                 --transition-type fade \
                 --transition-duration 1 \
                 --transition-fps 60
@@ -276,6 +276,7 @@ in
 {
   wayland.windowManager.hyprland = {
     enable = true;
+    configType = "hyprlang";
     systemd.enable = true;
     settings = {
       monitor = [
@@ -289,12 +290,13 @@ in
         "waybar"
         "hyprlock-led"
         "mkdir -p ~/.ssh/sockets" # for SSH ControlMaster multiplexing
-        "swww-daemon"
+        "awww-daemon"
         "variety"
         "wl-paste --type text --watch cliphist store"
         "wl-paste --type image --watch cliphist store"
-        # Re-apply wallpaper when a monitor is added (swww doesn't auto-sync new outputs)
+        # Re-apply wallpaper when a monitor is added (awww doesn't auto-sync new outputs)
         "${monitorWallpaperScript}"
+        "rquickshare"
       ];
 
       env = [
@@ -379,7 +381,6 @@ in
       };
 
       dwindle = {
-        pseudotile    = true;
         preserve_split = true;
       };
 
@@ -397,6 +398,9 @@ in
         "size 80% 60%, match:class ^(scratchpad)$"
         "center on, match:class ^(scratchpad)$"
         "workspace special:scratchpad, match:class ^(scratchpad)$"
+
+        # start in tray, not visible
+        "workspace special:background silent, match:class ^(rquickshare)$"
       ];
 
       layerrules = [
@@ -419,7 +423,7 @@ in
         "$mod, V, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
         "$mod, R, exec, fuzzel"
         "$mod, P, pseudo,"
-        "$mod, O, togglesplit,"
+        "$mod, O, layoutmsg, togglesplit"
 
         "$mod, B,       exec, zen-browser"
         "$mod SHIFT, D, exec, discord"

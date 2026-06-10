@@ -1,4 +1,4 @@
-{ pkgs, lib, user, claude-code, claude-desktop, ... }:
+{ pkgs, lib, user, claude-code, ... }:
 
 let
   computer-use-pkg = pkgs.python3.pkgs.buildPythonApplication {
@@ -52,7 +52,6 @@ in
 {
   home.packages = [
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
-    claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.claude-desktop
     computer-use-pkg
   ];
 

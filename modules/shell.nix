@@ -315,7 +315,7 @@
     enable = true;
     enableDefaultConfig = false;
 
-    matchBlocks = {
+    settings = {
       "*" = {
         addKeysToAgent = "yes"; # auto-add keys to agent on first use
         controlMaster = "auto"; # reuse connections — instant subsequent logins

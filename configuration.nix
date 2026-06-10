@@ -101,7 +101,11 @@ in
     enable = true;
     autoStart = true;
     openFirewall = true;
-    capSysAdmin = true; # needed for Wayland screen capture
+    capSysAdmin = true; # needed for KMS capture
+    settings = {
+      fec_percentage = 0; # disabled, no packet loss on gigabit LAN
+      encoder = "vaapi"; # pin hardware encoder, skip nvenc probe
+    };
   };
 
   # uinput device needed for Sunshine's virtual keyboard/mouse/gamepad input
@@ -138,6 +142,9 @@ in
   networking.firewall = {
     enable = true;
     trustedInterfaces = [ "tailscale0" "docker0" ];
+    allowedTCPPortRanges = [ { from = 1714; to = 1764; } ];  # Valent (KDE Connect)
+    allowedUDPPortRanges = [ { from = 1714; to = 1764; } ];  # Valent (KDE Connect)
+    allowedTCPPorts = [ 49152 ];                              # rquickshare (Quick Share)
     allowedUDPPorts = [ config.services.tailscale.port ];
   };
 

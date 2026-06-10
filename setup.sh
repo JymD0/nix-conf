@@ -272,6 +272,7 @@ header "Step 2: Copy config to /etc/nixos"
 if [[ "$SCRIPT_DIR" != "/etc/nixos" ]]; then
   log "Copying config files to /etc/nixos ..."
   cp "$SCRIPT_DIR/flake.nix"         /etc/nixos/flake.nix
+  cp "$SCRIPT_DIR/flake.lock"        /etc/nixos/flake.lock
   cp "$SCRIPT_DIR/configuration.nix" /etc/nixos/configuration.nix
   cp "$SCRIPT_DIR/home.nix"          /etc/nixos/home.nix
   cp "$SCRIPT_DIR/user.nix"          /etc/nixos/user.nix
@@ -310,7 +311,7 @@ if git -C /etc/nixos config --get core.sparseCheckout &>/dev/null; then
 fi
 
 log "Staging config files (with placeholder user.nix) ..."
-git -C /etc/nixos add flake.nix configuration.nix home.nix user.nix modules/ assets/ scripts/ 2>/dev/null || git -C /etc/nixos add flake.nix configuration.nix home.nix user.nix modules/
+git -C /etc/nixos add flake.nix flake.lock configuration.nix home.nix user.nix modules/ assets/ scripts/ 2>/dev/null || git -C /etc/nixos add flake.nix flake.lock configuration.nix home.nix user.nix modules/
 
 # ============================================================
 header "Step 4: Write user.nix with real values"
@@ -408,7 +409,7 @@ log "Old generations cleaned."
 
 log "Running nixos-rebuild switch (this will take a while) ..."
 NIX_CONFIG="experimental-features = nix-command flakes" \
-  nixos-rebuild switch --flake "/etc/nixos#$SETUP_HOSTNAME"
+  nixos-rebuild switch --flake "path:/etc/nixos#$SETUP_HOSTNAME"
 
 # ============================================================
 header "Step 8: Set user password"

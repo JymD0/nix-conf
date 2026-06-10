@@ -65,7 +65,7 @@ CONF
 if [ -z "$1" ]; then
   exit 1
 fi
-${pkgs.swww}/bin/swww img "$1" \
+${pkgs.awww}/bin/awww img "$1" \
   --transition-type fade \
   --transition-duration 1 \
   --transition-fps 60
@@ -75,7 +75,7 @@ SCRIPT
 
     cat > "$scripts_dir/get_wallpaper" << 'SCRIPT'
 #!/bin/sh
-${pkgs.swww}/bin/swww query | grep -oP 'image: \K.*' | head -1
+${pkgs.awww}/bin/awww query | grep -oP 'image: \K.*' | head -1
 SCRIPT
     chmod +x "$scripts_dir/get_wallpaper"
 

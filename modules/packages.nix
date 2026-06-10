@@ -180,7 +180,7 @@ in
     libsecret # CLI (secret-tool) for keyring access — used by ai script
 
     # Wallpaper
-    swww
+    awww
     variety
 
     # Calendar
@@ -203,7 +203,7 @@ in
 
     # Language toolchains
     nodejs
-    nodePackages.typescript
+    typescript
     gcc
     jdk
     kotlin
@@ -223,8 +223,8 @@ in
     yamllint
     taplo
     html-tidy
-    nodePackages.prettier
-    nodePackages.stylelint
+    prettier
+    stylelint
     markdownlint-cli2
 
     # Jupyter
@@ -249,6 +249,10 @@ in
 
     # Music
     spotify
+
+    # Phone integration
+    valent        # KDE Connect protocol (notifications, clipboard, media)
+    rquickshare   # Google Quick Share for Linux (native file transfer)
   ];
 
   # ─── VS Code ──────────────────────────────────────────────────────────────────
@@ -408,6 +412,18 @@ in
         client_secret.fetch = ["command", "${pkgs.libsecret}/bin/secret-tool", "lookup", "service", "vdirsyncer", "attribute", "client_secret"]
         ${extraCalPairs}
       '';
+    };
+
+  };
+
+  # rquickshare settings: static port for firewall + download path
+  xdg.dataFile."dev.mandre.rquickshare/.settings.json" = {
+    force = true;
+    text = builtins.toJSON {
+    visibility = "Everyone";
+    download_path = "${config.home.homeDirectory}/Downloads/QuickShare";
+    port = 49152;
+    realclose = false;
     };
   };
 }

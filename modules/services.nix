@@ -547,6 +547,23 @@ in
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
+  # ─── Phone integration ───────────────────────────────────────────────────────
+  systemd.user.services.valent = {
+    Unit = {
+      Description = "Valent (KDE Connect for GTK)";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${pkgs.valent}/bin/valent --gapplication-service";
+      Restart = "on-failure";
+      RestartSec = "5s";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+
   # ─── ActivityWatch — time tracking ────────────────────────────────────────────
   systemd.user.services.aw-server = {
     Unit = {
