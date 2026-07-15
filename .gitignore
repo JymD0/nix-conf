@@ -1,4 +1,7 @@
 .env.local
+.pi/tasks.json
+.pi/tasks.json.*.tmp
+.pi/tasks.json.lock/
 __pycache__/
 *.pyc
 result

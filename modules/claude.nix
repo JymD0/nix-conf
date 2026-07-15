@@ -1,53 +1,7 @@
 { pkgs, lib, user, claude-code, ... }:
 
 let
-  computer-use-pkg = pkgs.python3.pkgs.buildPythonApplication {
-    pname = "computer-use";
-    version = "0.1.0";
-    src = ../scripts/computer-use;
-    format = "pyproject";
-
-    nativeBuildInputs = [
-      pkgs.python3.pkgs.setuptools
-      pkgs.gobject-introspection
-      pkgs.wrapGAppsHook3
-    ];
-
-    propagatedBuildInputs = with pkgs.python3.pkgs; [
-      mcp
-      pillow
-      pycairo
-      pygobject3
-    ];
-
-    buildInputs = [
-      pkgs.at-spi2-core
-      pkgs.gtk4
-      pkgs.gtk4-layer-shell
-    ];
-
-    # prevent wrapGAppsHook from double-wrapping (buildPythonApplication already wraps)
-    dontWrapGApps = true;
-
-    # merge GI typelib paths and runtime tools into the Python wrapper
-    # LD_PRELOAD for gtk4-layer-shell: must load before libwayland-client
-    preFixup = ''
-      makeWrapperArgs+=(
-        "''${gappsWrapperArgs[@]}"
-        --prefix PATH : ${pkgs.lib.makeBinPath [
-          pkgs.grim
-          pkgs.wtype
-          pkgs.ydotool
-          pkgs.wl-clipboard
-          pkgs.hyprland
-        ]}
-        --set LD_PRELOAD ${pkgs.gtk4-layer-shell}/lib/libgtk4-layer-shell.so
-        --set YDOTOOL_SOCKET /run/ydotoold/socket
-      )
-    '';
-
-    doCheck = false;
-  };
+  computer-use-pkg = import ./computer-use.nix { inherit pkgs; };
 in
 {
   home.packages = [
@@ -511,9 +465,9 @@ in
       INPUT=$(cat 2>/dev/null) || exit 0
       TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null) || exit 0
 
-      [ "$TOOL" != "Bash" ] && exit 0
+      [[ "$TOOL" != "Bash" && "$TOOL" != "bash" ]] && exit 0
 
-      COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
+      COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // .tool_args.command // empty' 2>/dev/null) || exit 0
       [ -z "$COMMAND" ] && exit 0
 
       block() {
@@ -551,11 +505,33 @@ in
       re='git[[:space:]]+branch[[:space:]]+-D'
       [[ "$COMMAND" =~ $re ]] && block "Blocked: git branch -D force-deletes a branch. Ask the user first"
 
-      re='git[[:space:]]+checkout[[:space:]]+--[[:space:]]+\.([[:space:]]|$)'
-      [[ "$COMMAND" =~ $re ]] && block "Blocked: discarding all working changes. Ask the user first"
+      re='git[[:space:]]+checkout[[:space:]]+--[[:space:]]+'
+      [[ "$COMMAND" =~ $re ]] && block "Blocked: git checkout -- discards working changes. Ask the user first"
 
-      re='git[[:space:]]+restore[[:space:]]+(--[[:alpha:]-]+[[:space:]]+)*\.([[:space:]]|$)'
-      [[ "$COMMAND" =~ $re ]] && block "Blocked: discarding all working changes. Ask the user first"
+      re='git[[:space:]]+restore([[:space:]]|$)'
+      [[ "$COMMAND" =~ $re ]] && block "Blocked: git restore can discard working changes. Ask the user first"
+
+      re='git[[:space:]]+worktree[[:space:]]+(remove|prune)([[:space:]]|$)'
+      [[ "$COMMAND" =~ $re ]] && block "Blocked: removing or pruning worktrees. Ask the user first"
+
+      re='git[[:space:]]+stash[[:space:]]+(drop|clear)([[:space:]]|$)'
+      [[ "$COMMAND" =~ $re ]] && block "Blocked: deleting stashed changes. Ask the user first"
+
+      # Block removal when it targets a dirty path in the current worktree.
+      if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        while IFS= read -r dirty_path; do
+          [ -n "$dirty_path" ] || continue
+          dirty_path="''${dirty_path#* -> }"
+          [[ "$COMMAND" == *"$dirty_path"* ]] && \
+            [[ "$COMMAND" =~ (^|[[:space:];|&])rm[[:space:]] ]] && \
+            block "Blocked: rm targets a path with uncommitted changes: $dirty_path"
+        done < <(git status --porcelain=v1 --untracked-files=all 2>/dev/null | cut -c4-)
+
+        re='(^|[[:space:];|&])rm[[:space:]]+-[[:alpha:]]*r'
+        if [[ "$COMMAND" =~ $re ]] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+          block "Blocked: recursive rm in a dirty worktree. Commit, stash, or ask the user first"
+        fi
+      fi
 
       # Device/disk operations
       re='>[[:space:]]*/dev/'
@@ -623,7 +599,7 @@ in
       MAX_LINES=20
 
       INPUT=$(cat 2>/dev/null) || exit 0
-      FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || exit 0
+      FILE=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_args.path // empty' 2>/dev/null) || exit 0
       [ -z "$FILE" ] && exit 0
       [ ! -f "$FILE" ] && exit 0
 

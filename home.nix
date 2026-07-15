@@ -10,6 +10,7 @@
     ./modules/desktop.nix
     ./modules/services.nix
     ./modules/claude.nix
+    ./modules/pi.nix
     ./modules/ai.nix
     ./modules/walker.nix
   ];
