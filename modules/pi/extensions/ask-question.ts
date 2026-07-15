@@ -1,6 +1,17 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import {
+  DynamicBorder,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import {
+  Container,
+  Editor,
+  type EditorTheme,
+  type SelectItem,
+  SelectList,
+  Text,
+} from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 
 const QUESTION_KINDS = ["select", "multi-select", "confirm", "text"] as const;
@@ -118,6 +129,283 @@ function optionDisplay(
   return `${mark}${index + 1}. ${option.label}${description}`;
 }
 
+type ChoiceAnswer = {
+  cancelled: boolean;
+  labels: string[];
+  text?: string;
+  values: string[];
+};
+
+async function askChoiceWithAmend(
+  params: AskQuestionParams,
+  signal: AbortSignal | undefined,
+  ctx: ExtensionContext,
+): Promise<ChoiceAnswer> {
+  const options = params.options ?? [];
+  const multi = params.kind === "multi-select";
+
+  return ctx.ui.custom<ChoiceAnswer>((tui, theme, keybindings, done) => {
+    const selected = new Set<number>();
+    const amended = new Map<number, string>();
+    const custom: string[] = [];
+    let completed = false;
+    let editing = false;
+    let editingOption: number | undefined;
+    let highlighted = 0;
+    let list: SelectList;
+
+    const editorTheme: EditorTheme = {
+      borderColor: (text) => theme.fg("accent", text),
+      selectList: {
+        selectedPrefix: (text) => theme.fg("accent", text),
+        selectedText: (text) => theme.fg("accent", text),
+        description: (text) => theme.fg("muted", text),
+        scrollInfo: (text) => theme.fg("dim", text),
+        noMatch: (text) => theme.fg("warning", text),
+      },
+    };
+    const editor = new Editor(tui, editorTheme);
+    const keys = (binding: Parameters<typeof keybindings.getKeys>[0]) =>
+      keybindings.getKeys(binding).join("/");
+
+    const finish = (answer: ChoiceAnswer) => {
+      if (completed) return;
+      completed = true;
+      done(answer);
+    };
+
+    const answer = (): ChoiceAnswer => {
+      const values: string[] = [];
+      const labels: string[] = [];
+      for (let index = 0; index < options.length; index += 1) {
+        const changed = amended.get(index);
+        if (changed !== undefined) {
+          values.push(changed);
+          labels.push(changed);
+        } else if (selected.has(index)) {
+          values.push(options[index].value);
+          labels.push(options[index].label);
+        }
+      }
+      values.push(...custom);
+      labels.push(...custom);
+      return { cancelled: false, values, labels };
+    };
+
+    const items = (): SelectItem[] => {
+      const result = options.map((option, index) => {
+        const changed = amended.get(index);
+        const marker = multi
+          ? changed !== undefined
+            ? "[~] "
+            : selected.has(index)
+              ? "[x] "
+              : "[ ] "
+          : "";
+        return {
+          value: `option:${index}`,
+          label: `${marker}${index + 1}. ${option.label}`,
+          description:
+            changed !== undefined ? `Amended: ${changed}` : option.description,
+        };
+      });
+      if (params.allowOther) {
+        result.push({
+          value: "other",
+          label: OTHER,
+          description: "Add a custom answer",
+        });
+      }
+      if (multi) {
+        result.push({
+          value: "done",
+          label: `${DONE} (${selected.size + amended.size + custom.length} selected)`,
+          description: "Submit these answers",
+        });
+      }
+      return result;
+    };
+
+    const rebuildList = () => {
+      const currentItems = items();
+      list = new SelectList(currentItems, Math.min(currentItems.length, 12), {
+        selectedPrefix: (text) => theme.fg("accent", text),
+        selectedText: (text) => theme.fg("accent", text),
+        description: (text) => theme.fg("muted", text),
+        scrollInfo: (text) => theme.fg("dim", text),
+        noMatch: (text) => theme.fg("warning", text),
+      });
+      highlighted = Math.max(0, Math.min(highlighted, currentItems.length - 1));
+      list.setSelectedIndex(highlighted);
+      list.onSelectionChange = (item) => {
+        const index = currentItems.findIndex(
+          (candidate) => candidate.value === item.value,
+        );
+        if (index >= 0) highlighted = index;
+      };
+      list.onCancel = () => finish({ cancelled: true, values: [], labels: [] });
+      list.onSelect = (item) => {
+        if (item.value === "done") {
+          finish(answer());
+          return;
+        }
+        if (item.value === "other") {
+          editing = true;
+          editingOption = undefined;
+          editor.setText("");
+          tui.requestRender();
+          return;
+        }
+
+        const index = Number(item.value.slice("option:".length));
+        if (!Number.isInteger(index) || !options[index]) return;
+        if (!multi) {
+          finish({
+            cancelled: false,
+            values: [options[index].value],
+            labels: [options[index].label],
+          });
+          return;
+        }
+        if (selected.has(index)) selected.delete(index);
+        else if (amended.has(index)) amended.delete(index);
+        else selected.add(index);
+        rebuildList();
+        tui.requestRender();
+      };
+    };
+
+    const startAmending = () => {
+      const item = list.getSelectedItem();
+      if (!item || item.value === "done") return;
+      if (item.value === "other") {
+        editingOption = undefined;
+        editor.setText("");
+      } else {
+        const index = Number(item.value.slice("option:".length));
+        if (!Number.isInteger(index) || !options[index]) return;
+        editingOption = index;
+        editor.setText(amended.get(index) ?? options[index].label);
+      }
+      editing = true;
+      tui.requestRender();
+    };
+
+    editor.onSubmit = (value) => {
+      const text = value.trim().slice(0, 10_000);
+      if (!text) {
+        editing = false;
+        editingOption = undefined;
+        editor.setText("");
+        tui.requestRender();
+        return;
+      }
+      if (!multi) {
+        finish({
+          cancelled: false,
+          values: [text],
+          labels: [text],
+          text,
+        });
+        return;
+      }
+      if (editingOption === undefined) {
+        if (!custom.includes(text)) custom.push(text);
+      } else {
+        selected.delete(editingOption);
+        amended.set(editingOption, text);
+      }
+      editing = false;
+      editingOption = undefined;
+      editor.setText("");
+      rebuildList();
+      tui.requestRender();
+    };
+
+    rebuildList();
+    const abort = () => finish({ cancelled: true, values: [], labels: [] });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) queueMicrotask(abort);
+
+    return {
+      get focused() {
+        return editor.focused;
+      },
+      set focused(value: boolean) {
+        editor.focused = value;
+      },
+      render(width: number) {
+        const container = new Container();
+        container.addChild(
+          new DynamicBorder((text: string) => theme.fg("accent", text)),
+        );
+        container.addChild(new Text(theme.fg("text", params.question), 1, 0));
+        container.addChild(list);
+        if (editing) {
+          container.addChild(
+            new Text(
+              theme.fg(
+                "muted",
+                editingOption === undefined
+                  ? "Custom answer:"
+                  : "Amend highlighted answer:",
+              ),
+              1,
+              0,
+            ),
+          );
+          container.addChild(editor);
+        }
+        container.addChild(
+          new Text(
+            theme.fg(
+              "dim",
+              editing
+                ? `${keys("tui.input.submit")} submit amendment • ${keys("tui.select.cancel")} return to choices`
+                : multi
+                  ? `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} toggle • ${keys("tui.input.tab")} amend • Done submit • ${keys("tui.select.cancel")} cancel`
+                  : `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} select • ${keys("tui.input.tab")} amend • ${keys("tui.select.cancel")} cancel`,
+            ),
+            1,
+            0,
+          ),
+        );
+        container.addChild(
+          new DynamicBorder((text: string) => theme.fg("accent", text)),
+        );
+        return container.render(width);
+      },
+      invalidate() {
+        list.invalidate();
+        editor.invalidate();
+      },
+      handleInput(data: string) {
+        if (editing) {
+          if (keybindings.matches(data, "tui.select.cancel")) {
+            editing = false;
+            editingOption = undefined;
+            editor.setText("");
+            tui.requestRender();
+            return;
+          }
+          editor.handleInput(data);
+          tui.requestRender();
+          return;
+        }
+        if (keybindings.matches(data, "tui.input.tab")) {
+          startAmending();
+          return;
+        }
+        list.handleInput(data);
+        tui.requestRender();
+      },
+      dispose() {
+        signal?.removeEventListener("abort", abort);
+      },
+    };
+  });
+}
+
 export default function askQuestion(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask_question",
@@ -179,6 +467,36 @@ export default function askQuestion(pi: ExtensionAPI): void {
       }
 
       const options = params.options ?? [];
+      if (ctx.mode === "tui") {
+        const answer = await askChoiceWithAmend(params, signal, ctx);
+        if (answer.cancelled) {
+          return result("User cancelled the question.", {
+            ...base,
+            cancelled: true,
+          });
+        }
+        if (params.kind === "select") {
+          if (answer.text !== undefined) {
+            return result(`User wrote: ${answer.text || "(empty response)"}`, {
+              ...base,
+              values: answer.values,
+              labels: answer.labels,
+              text: answer.text,
+            });
+          }
+          return result(
+            `User selected: ${answer.labels[0]} (${answer.values[0]})`,
+            { ...base, values: answer.values, labels: answer.labels },
+          );
+        }
+        return result(
+          answer.labels.length
+            ? `User selected: ${answer.labels.join(", ")}`
+            : "User selected no options.",
+          { ...base, values: answer.values, labels: answer.labels },
+        );
+      }
+
       if (params.kind === "select") {
         const displays = options.map((option, index) =>
           optionDisplay(option, index),

@@ -586,6 +586,10 @@ in
     force = true;
     source = ./pi/extensions/project-tasks.ts;
   };
+  home.file.".pi/agent/extensions/session-history.ts" = {
+    force = true;
+    source = ./pi/extensions/session-history.ts;
+  };
 
   home.file.".pi/agent/lib/bounded-exec.ts" = {
     force = true;
@@ -598,6 +602,10 @@ in
   home.file.".pi/agent/lib/project-check-core.ts" = {
     force = true;
     source = ./pi/lib/project-check-core.ts;
+  };
+  home.file.".pi/agent/lib/session-history-core.ts" = {
+    force = true;
+    source = ./pi/lib/session-history-core.ts;
   };
 
   home.file.".pi/agent/extensions/prompt-stash.ts" = {
