@@ -527,6 +527,9 @@ in
         ", XF86AudioPlay, exec, playerctl play-pause"
         ", XF86AudioNext, exec, playerctl next"
         ", XF86AudioPrev, exec, playerctl previous"
+        # logind only locks on AC, so turn the panel off ourselves when the lid closes
+        ", switch:on:Lid Switch, exec, hyprctl dispatch dpms off eDP-1"
+        ", switch:off:Lid Switch, exec, hyprctl dispatch dpms on eDP-1"
       ];
 
     };

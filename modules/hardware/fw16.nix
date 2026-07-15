@@ -60,6 +60,39 @@ in
   # Framework ships firmware updates via fwupd
   services.fwupd.enable = true;
 
+  # Fan control (Framework EC-aware curves)
+  hardware.fw-fanctrl.enable = true;
+  hardware.fw-fanctrl.config = {
+    defaultStrategy = "default";
+    strategies = {
+      default = {
+        fanSpeedUpdateFrequency = 5;
+        movingAverageInterval = 30;
+        speedCurve = [
+          { temp = 0;  speed = 0; }
+          { temp = 50; speed = 15; }
+          { temp = 65; speed = 25; }
+          { temp = 70; speed = 35; }
+          { temp = 75; speed = 50; }
+          { temp = 80; speed = 80; }
+          { temp = 85; speed = 100; }
+        ];
+      };
+      cool = {
+        fanSpeedUpdateFrequency = 5;
+        movingAverageInterval = 10;
+        speedCurve = [
+          { temp = 0;  speed = 25; }
+          { temp = 45; speed = 35; }
+          { temp = 55; speed = 50; }
+          { temp = 65; speed = 65; }
+          { temp = 70; speed = 80; }
+          { temp = 75; speed = 100; }
+        ];
+      };
+    };
+  };
+
   # Power management (critical for laptop battery life)
   services.power-profiles-daemon.enable = true;
   powerManagement.powertop.enable = false; # disabled: conflicts with power-profiles-daemon, causes USB HID autosuspend lag

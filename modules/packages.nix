@@ -157,6 +157,7 @@ in
 
     # Apps
     discord
+    prismlauncher  # Minecraft launcher
     foxglove-studio
     pinta
     vlc
@@ -173,6 +174,7 @@ in
 
     # Git
     gh
+    tea  # forgejo/gitea CLI
 
     # SSH & File Transfer
     termscp
@@ -306,6 +308,26 @@ in
   # ─── XDG dirs ──────────────────────────────────────────────────────────────────
   xdg = {
     enable = true;
+
+    # Keep Chromium available for Playwright without letting it become the default browser.
+    mimeApps = {
+      enable = true;
+      defaultApplications = {
+        "application/pdf" = "zen.desktop";
+        "application/x-extension-htm" = "zen.desktop";
+        "application/x-extension-html" = "zen.desktop";
+        "application/x-extension-shtml" = "zen.desktop";
+        "application/x-extension-xht" = "zen.desktop";
+        "application/x-extension-xhtml" = "zen.desktop";
+        "application/xhtml+xml" = "zen.desktop";
+        "text/html" = "zen.desktop";
+        "x-scheme-handler/chrome" = "zen.desktop";
+        "x-scheme-handler/claude-cli" = "claude-code-url-handler.desktop";
+        "x-scheme-handler/http" = "zen.desktop";
+        "x-scheme-handler/https" = "zen.desktop";
+      };
+    };
+
     userDirs = {
       enable = true;
       createDirectories = true;
@@ -340,6 +362,8 @@ in
     };
 
     configFile = {
+      "mimeapps.list".force = true;
+
       # ─── khal calendar config ─────────────────────────────────────────────────
       "khal/config".text = let
         extraCalSections = lib.concatStrings (lib.mapAttrsToList (name: cal: ''

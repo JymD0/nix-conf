@@ -411,6 +411,75 @@ log "Running nixos-rebuild switch (this will take a while) ..."
 NIX_CONFIG="experimental-features = nix-command flakes" \
   nixos-rebuild switch --flake "path:/etc/nixos#$SETUP_HOSTNAME"
 
+# Pi and its packages are pinned in modules/pi.nix. npm provides the supported
+# release artifact while Home Manager owns its configuration and wrapper.
+PI_PREFIX="/home/$SETUP_USERNAME/.local/share/pi"
+log "Installing Pi coding agent ..."
+sudo -u "$SETUP_USERNAME" -H "/etc/profiles/per-user/$SETUP_USERNAME/bin/npm" \
+  install --global --ignore-scripts --prefix "$PI_PREFIX" \
+  @earendil-works/pi-coding-agent@0.80.7 \
+  @firfi/huly-mcp@0.44.4 \
+  firecrawl-mcp@3.22.3 \
+  @playwright/cli@0.1.17
+
+log "Installing declared Pi packages ..."
+sudo -u "$SETUP_USERNAME" -H "$PI_PREFIX/bin/pi" update --extensions
+
+# Pi skips versioned npm specs during updates, so reconcile this upgraded pin
+# explicitly when setup is rerun on an existing installation.
+sudo -u "$SETUP_USERNAME" -H "/etc/profiles/per-user/$SETUP_USERNAME/bin/npm" \
+  install --silent --prefix "/home/$SETUP_USERNAME/.pi/agent/npm" \
+  --save-exact @narumitw/pi-codex-usage@0.15.1
+
+# The usage package detects quota windows from their reported duration. Keep
+# reset countdowns in its compact status so the footer can show both values.
+CODEX_USAGE_EXTENSION="/home/$SETUP_USERNAME/.pi/agent/npm/node_modules/@narumitw/pi-codex-usage/src/format.ts"
+if [[ -f "$CODEX_USAGE_EXTENSION" ]] && ! grep -q 'formatResetRemaining' "$CODEX_USAGE_EXTENSION"; then
+  sudo -u "$SETUP_USERNAME" -H "/etc/profiles/per-user/$SETUP_USERNAME/bin/node" \
+    - "$CODEX_USAGE_EXTENSION" <<'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+let source = fs.readFileSync(path, "utf8");
+const replacements = [
+  [
+    '${formatRemainingPercent(snapshot.primary)} ${formatWindowLabel(snapshot.primary, "5h", true)}',
+    '${formatWindowLabel(snapshot.primary, "5h", true)} ${formatRemainingPercent(snapshot.primary)}${snapshot.primary.resetsAt ? `→${formatResetRemaining(snapshot.primary.resetsAt)}` : ""}',
+  ],
+  [
+    '${formatRemainingPercent(snapshot.secondary)} ${formatWindowLabel(snapshot.secondary, "weekly", true)}',
+    '${formatWindowLabel(snapshot.secondary, "weekly", true)} ${formatRemainingPercent(snapshot.secondary)}${snapshot.secondary.resetsAt ? `→${formatResetRemaining(snapshot.secondary.resetsAt)}` : ""}',
+  ],
+];
+for (const [oldText, newText] of replacements) {
+  if (!source.includes(oldText)) throw new Error(`Codex usage patch target not found: ${oldText}`);
+  source = source.replace(oldText, newText);
+}
+const marker = "function formatReset(epochSeconds: number): string {";
+const helper = [
+  "function formatResetRemaining(epochSeconds: number): string {",
+  "\tconst minutes = Math.max(0, Math.ceil((epochSeconds * 1000 - Date.now()) / 60_000));",
+  "\tif (minutes >= 1_440) return `${Math.floor(minutes / 1_440)}d${Math.floor((minutes % 1_440) / 60)}h`;",
+  "\tif (minutes >= 60) return `${Math.floor(minutes / 60)}h${minutes % 60}m`;",
+  "\treturn `${minutes}m`;",
+  "}",
+  "",
+].join("\n");
+if (!source.includes(marker)) throw new Error("Codex usage reset formatter not found");
+fs.writeFileSync(path, source.replace(marker, helper + marker));
+NODE
+fi
+
+# Keep the pinned remote-pi package aligned with the lifecycle fixes declared
+# in modules/pi/patch-remote-pi.cjs. Home Manager runs the same patcher on every
+# rebuild; setup runs it here because package installation happens afterwards.
+REMOTE_PI_EXTENSION="/home/$SETUP_USERNAME/.pi/agent/npm/node_modules/remote-pi/dist/index.js"
+REMOTE_PI_PATCHER="/etc/nixos/modules/pi/patch-remote-pi.cjs"
+if [[ -f "$REMOTE_PI_EXTENSION" ]]; then
+  [[ -f "$REMOTE_PI_PATCHER" ]] || err "Missing remote-pi patcher: $REMOTE_PI_PATCHER"
+  sudo -u "$SETUP_USERNAME" -H "/etc/profiles/per-user/$SETUP_USERNAME/bin/node" \
+    "$REMOTE_PI_PATCHER" "$REMOTE_PI_EXTENSION"
+fi
+
 # ============================================================
 header "Step 8: Set user password"
 # ============================================================
@@ -481,9 +550,10 @@ echo ""
 echo -e "${GREEN}${BOLD}Setup complete.${NC} Here's what to do next:"
 echo ""
 echo -e "  1. ${BOLD}Reboot${NC}              \u2192 sudo reboot"
-echo -e "  2. ${BOLD}Authenticate Claude${NC} \u2192 claude login"
-echo -e "  3. ${BOLD}Copy SSH key${NC}        \u2192 ssh-copy-id <your-server>"
-echo -e "  4. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/user.nix (sshHosts)"
+echo -e "  2. ${BOLD}Authenticate Pi${NC}     \u2192 pi, then /login and select OpenAI ChatGPT Plus/Pro"
+echo -e "  3. ${BOLD}Authenticate Claude${NC} \u2192 claude login"
+echo -e "  4. ${BOLD}Copy SSH key${NC}        \u2192 ssh-copy-id <your-server>"
+echo -e "  5. ${BOLD}Add SSH hosts${NC}       \u2192 edit /etc/nixos/user.nix (sshHosts)"
 echo -e "                         then run: rebuild"
 echo ""
 warn "hardware-configuration.nix is machine-specific and not committed to the repo."

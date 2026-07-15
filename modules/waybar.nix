@@ -248,6 +248,39 @@ let
     pkill -RTMIN+9 waybar 2>/dev/null || true
   '';
 
+  # Fan speed from framework_laptop hwmon + active fw-fanctrl strategy
+  fanStatusScript = pkgs.writeShellScript "fan-status" ''
+    for hw in /sys/class/hwmon/hwmon*; do
+      [ "$(cat "$hw/name" 2>/dev/null)" = "framework_laptop" ] && break
+      hw=""
+    done
+    [ -z "$hw" ] && exit 0
+
+    FAN1=$(cat "$hw/fan1_input" 2>/dev/null || echo 0)
+    FAN2=$(cat "$hw/fan2_input" 2>/dev/null || echo 0)
+    MAX=$(( FAN1 > FAN2 ? FAN1 : FAN2 ))
+    MODE=$(cat "''${XDG_RUNTIME_DIR:-/tmp}/fw-fanctrl-mode" 2>/dev/null || echo "default")
+
+    if [ "$MAX" -eq 0 ]; then
+      printf '{"text":"","alt":"%s","tooltip":"Fans silent","class":"silent %s"}\n' "$MODE" "$MODE"
+    else
+      printf '{"text":"","alt":"%s","tooltip":"CPU: %s RPM  GPU: %s RPM","class":"on %s"}\n' "$MODE" "$FAN1" "$FAN2" "$MODE"
+    fi
+  '';
+
+  fanToggleScript = pkgs.writeShellScript "fan-toggle" ''
+    STATEFILE="''${XDG_RUNTIME_DIR:-/tmp}/fw-fanctrl-mode"
+    MODE=$(cat "$STATEFILE" 2>/dev/null || echo "default")
+    if [ "$MODE" = "default" ]; then
+      NEW="cool"
+    else
+      NEW="default"
+    fi
+    ${pkgs.fw-fanctrl}/bin/fw-fanctrl use "$NEW" 2>/dev/null
+    echo "$NEW" > "$STATEFILE"
+    pkill -RTMIN+10 waybar 2>/dev/null || true
+  '';
+
   # Sunshine remote streaming status for Waybar
   sunshineWaybarScript = pkgs.writeShellScript "waybar-sunshine" ''
     # hide module entirely if sunshine isn't running
@@ -320,6 +353,21 @@ in
           format = "{percentage}%";
           tooltip-format = "RAM: {used:0.1f}G / {total:0.1f}G";
           on-click = "kitty -e btop";
+        };
+
+        "custom/fan" = {
+          interval = 5;
+          return-type = "json";
+          exec = "${fanStatusScript}";
+          signal = 10;
+          format = "{icon}";
+          format-icons = {
+            default = "󰈐";
+            cool = "󱑴";
+          };
+          on-click = "${fanToggleScript}";
+          on-click-right = "kitty -e btop";
+          tooltip = true;
         };
 
         temperature = {
@@ -528,6 +576,7 @@ in
           "cpu"
           "memory"
           "temperature"
+          "custom/fan"
           "pulseaudio"
           "backlight"
           "custom/ledmatrix"
@@ -572,6 +621,7 @@ in
               "cpu"
               "memory"
               "temperature"
+              "custom/fan"
               "pulseaudio"
               "custom/brightness"
               "battery"
@@ -687,6 +737,7 @@ in
         #bluetooth,
         #battery,
         #power-profiles-daemon,
+        #custom-fan,
         #custom-media,
         #custom-youtube-sync,
         #custom-tailscale,
@@ -714,6 +765,9 @@ in
 
         #temperature          { color: #ffb86c; }
         #temperature.critical { color: #ff5555; }
+
+        #custom-fan         { color: #ffb86c; padding: 0 10px; }
+        #custom-fan.cool    { color: #8be9fd; }
 
         #pulseaudio       { color: #bd93f9; }
         #pulseaudio.muted { color: #6272a4; }
@@ -828,6 +882,7 @@ in
         window#waybar:not(.eDP-1) #pulseaudio,
         window#waybar:not(.eDP-1) #backlight,
         window#waybar:not(.eDP-1) #custom-brightness,
+        window#waybar:not(.eDP-1) #custom-fan,
         window#waybar:not(.eDP-1) #custom-ledmatrix,
         window#waybar:not(.eDP-1) #bluetooth,
         window#waybar:not(.eDP-1) #battery,

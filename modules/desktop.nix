@@ -164,6 +164,17 @@ SCRIPT
       hide-on-clear = true;
       hide-on-action = true;
 
+      # Strip the action buttons off phone notifications. Valent forwards the phone's
+      # buttons (Mark as read, Mute, Pause...) but they do nothing on the laptop, so
+      # hide them. desktop-entry pins this to Valent; id-matcher ".*" catches them all.
+      notification-action-filter = {
+        strip-valent-actions = {
+          desktop-entry = "ca.andyholmes.Valent";
+          use-regex = true;
+          id-matcher = ".*";
+        };
+      };
+
       scripts = {
         "notification-sound" = {
           exec = "${pkgs.libcanberra-gtk3}/bin/canberra-gtk-play -i message-new-instant -d notification";

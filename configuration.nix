@@ -56,6 +56,9 @@ in
   # Hostname
   networking.hostName = user.hostname;
   networking.networkmanager.enable = true;
+  # Keep the wifi radio awake. Powersave drops the socket, which makes KDE Connect
+  # reconnect constantly and dump phone notifications in delayed batches.
+  networking.networkmanager.wifi.powersave = false;
 
   # Time zone & locale (English language, Austrian region)
   time.timeZone = user.timezone;
@@ -105,6 +108,7 @@ in
     settings = {
       fec_percentage = 0; # disabled, no packet loss on gigabit LAN
       encoder = "vaapi"; # pin hardware encoder, skip nvenc probe
+      capture = "kms"; # wlr capture freezes Hyprland on disconnect, kms bypasses the compositor
     };
   };
 

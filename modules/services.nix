@@ -212,7 +212,9 @@ let
 
   # Sunshine session watcher: suppresses hypridle and holds a sleep inhibitor
   # while a Moonlight client is connected. Tails the Sunshine journal for
-  # CLIENT CONNECTED / CLIENT DISCONNECTED events.
+  # CLIENT CONNECTED / CLIENT DISCONNECTED events. Also inhibits lid-switch
+  # handling, since logind ignores plain sleep inhibitors for lid actions and
+  # would suspend mid-stream on battery.
   sunshineWatcherScript = pkgs.writeShellScript "sunshine-session-watcher" ''
     set -euo pipefail
     INHIBIT_PID=""
@@ -224,7 +226,7 @@ let
       [ -n "$INHIBIT_PID" ] && return
       touch "$SUPPRESS_FLAG"
       systemctl --user stop hypridle.service 2>/dev/null || true
-      ${pkgs.systemd}/bin/systemd-inhibit --what=sleep --who=sunshine-watcher \
+      ${pkgs.systemd}/bin/systemd-inhibit --what=sleep:handle-lid-switch --who=sunshine-watcher \
         --why="Sunshine client connected" --mode=block sleep infinity &
       INHIBIT_PID=$!
     }
@@ -331,6 +333,22 @@ let
         fi
       fi
     done
+  '';
+
+  # aw-server can wedge without exiting: a disk-full panic poisons its datastore
+  # lock and every request 504s forever while systemd still sees the process as
+  # running. Probe the buckets endpoint and restart the pair when it stops
+  # answering with real data.
+  awWatchdogScript = pkgs.writeShellScript "aw-watchdog" ''
+    set -euo pipefail
+    # leave it alone if the user stopped it on purpose
+    systemctl --user is-active --quiet aw-server.service || exit 0
+    if ${pkgs.curl}/bin/curl -sf -m 10 http://localhost:5600/api/0/buckets \
+        | ${pkgs.jq}/bin/jq -e 'type == "object"' > /dev/null; then
+      exit 0
+    fi
+    echo "aw-server not returning bucket data, restarting"
+    systemctl --user restart aw-server.service aw-awatcher.service
   '';
 
 in
@@ -594,5 +612,24 @@ in
       RestartSec = "5s";
     };
     Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  systemd.user.services.aw-watchdog = {
+    Unit = {
+      Description = "ActivityWatch health check";
+      After = [ "aw-server.service" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${awWatchdogScript}";
+    };
+  };
+
+  systemd.user.timers.aw-watchdog = {
+    Unit.Description = "ActivityWatch health check every 5 minutes";
+    Timer = {
+      OnCalendar = "*:0/5";
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 }
