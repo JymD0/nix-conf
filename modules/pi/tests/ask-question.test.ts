@@ -166,6 +166,56 @@ async function renderChoice(
   return renders;
 }
 
+const nonTuiOptions = [
+  {
+    value: "recommended",
+    label: "Recommended answer",
+    description: "Best default",
+  },
+  { value: "alternative", label: "Alternative answer" },
+];
+
+async function executeNonTuiChoice(
+  kind: "select" | "multi-select",
+  allowOther: boolean | undefined,
+  choose: (choices: string[], call: number) => string | undefined,
+  answer: (question: string, call: number) => string | undefined = () =>
+    undefined,
+  signal?: AbortSignal,
+) {
+  const selectCalls: Array<{ choices: string[]; signal: AbortSignal }> = [];
+  const inputCalls: Array<{ question: string; signal: AbortSignal }> = [];
+  const params = {
+    kind,
+    question: "Choose an approach",
+    options: nonTuiOptions,
+    ...(allowOther === undefined ? {} : { allowOther }),
+  };
+  const ctx = {
+    hasUI: true,
+    mode: "rpc",
+    ui: {
+      select(_question: string, choices: string[], options: any) {
+        selectCalls.push({ choices: [...choices], signal: options.signal });
+        return choose(choices, selectCalls.length - 1);
+      },
+      input(question: string, _placeholder: string, options: any) {
+        inputCalls.push({ question, signal: options.signal });
+        return answer(question, inputCalls.length - 1);
+      },
+    },
+  };
+
+  const response = await askQuestionTool.execute(
+    "call",
+    params,
+    signal,
+    undefined,
+    ctx,
+  );
+  return { response, selectCalls, inputCalls };
+}
+
 for (const kind of ["select", "multi-select"] as const) {
   test(`${kind} shows free text by default and honors allowOther`, async () => {
     assert.match((await renderChoice(kind, undefined))[0], /Type something/);
@@ -200,4 +250,86 @@ test("the free-text choice opens an empty editor", async () => {
   assert.match(editing, /Type your answer:/);
   assert.match(editing, /EDITOR:\n/);
   assert.doesNotMatch(editing, /EDITOR:Recommended answer/);
+});
+
+for (const kind of ["select", "multi-select"] as const) {
+  test(`${kind} non-TUI choices default allowOther and honor false/true`, async () => {
+    for (const [allowOther, expected] of [
+      [undefined, true],
+      [false, false],
+      [true, true],
+    ] as const) {
+      const { response, selectCalls } = await executeNonTuiChoice(
+        kind,
+        allowOther,
+        (choices) =>
+          kind === "select" ? choices[0] : choices[choices.length - 1],
+      );
+
+      assert.equal(selectCalls[0].choices.includes("Type something"), expected);
+      if (kind === "select") {
+        assert.deepEqual(response.details.values, ["recommended"]);
+        assert.deepEqual(response.details.labels, ["Recommended answer"]);
+      } else {
+        assert.deepEqual(response.details.values, []);
+        assert.deepEqual(response.details.labels, []);
+      }
+    }
+  });
+
+  test(`${kind} non-TUI custom answers work when allowOther is omitted or true`, async () => {
+    for (const allowOther of [undefined, true] as const) {
+      const { response, selectCalls, inputCalls } = await executeNonTuiChoice(
+        kind,
+        allowOther,
+        (choices, call) =>
+          call === 0 ? "Type something" : choices[choices.length - 1],
+        () => "  Custom answer  ",
+      );
+
+      assert.deepEqual(response.details.values, ["Custom answer"]);
+      assert.deepEqual(response.details.labels, ["Custom answer"]);
+      assert.equal(inputCalls.length, 1);
+      assert.equal(selectCalls.length, kind === "select" ? 1 : 2);
+      if (kind === "select")
+        assert.equal(response.details.text, "Custom answer");
+    }
+  });
+}
+
+test("multi-select non-TUI maps toggled options in the result", async () => {
+  const { response, selectCalls } = await executeNonTuiChoice(
+    "multi-select",
+    false,
+    (choices, call) => {
+      if (call === 0) return choices[1];
+      assert.match(choices[1], /^\[x\] 2\. Alternative answer/);
+      return choices[choices.length - 1];
+    },
+  );
+
+  assert.equal(selectCalls.length, 2);
+  assert.deepEqual(response.details.values, ["alternative"]);
+  assert.deepEqual(response.details.labels, ["Alternative answer"]);
+  assert.equal(response.content[0].text, "User selected: Alternative answer");
+});
+
+test("non-TUI choice cancellation preserves the signal and empty result", async () => {
+  for (const kind of ["select", "multi-select"] as const) {
+    const controller = new AbortController();
+    const { response, selectCalls, inputCalls } = await executeNonTuiChoice(
+      kind,
+      undefined,
+      () => undefined,
+      undefined,
+      controller.signal,
+    );
+
+    assert.equal(selectCalls[0].signal, controller.signal);
+    assert.equal(inputCalls.length, 0);
+    assert.equal(response.details.cancelled, true);
+    assert.deepEqual(response.details.values, []);
+    assert.deepEqual(response.details.labels, []);
+    assert.equal(response.content[0].text, "User cancelled the question.");
+  }
 });
