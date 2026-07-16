@@ -72,8 +72,12 @@ type QuestionDetails = {
   confirmed?: boolean;
 };
 
-const OTHER = "Other: type a different answer";
+const OTHER = "Type something";
 const DONE = "Done";
+
+function allowsOther(params: AskQuestionParams): boolean {
+  return params.allowOther !== false;
+}
 
 function result(text: string, details: QuestionDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -206,14 +210,14 @@ async function askChoiceWithAmend(
           value: `option:${index}`,
           label: `${marker}${index + 1}. ${option.label}`,
           description:
-            changed !== undefined ? `Amended: ${changed}` : option.description,
+            changed !== undefined ? `Edited: ${changed}` : option.description,
         };
       });
-      if (params.allowOther) {
+      if (allowsOther(params)) {
         result.push({
           value: "other",
           label: OTHER,
-          description: "Add a custom answer",
+          description: "Write your own answer",
         });
       }
       if (multi) {
@@ -347,8 +351,8 @@ async function askChoiceWithAmend(
               theme.fg(
                 "muted",
                 editingOption === undefined
-                  ? "Custom answer:"
-                  : "Amend highlighted answer:",
+                  ? "Type your answer:"
+                  : "Edit highlighted answer:",
               ),
               1,
               0,
@@ -361,10 +365,10 @@ async function askChoiceWithAmend(
             theme.fg(
               "dim",
               editing
-                ? `${keys("tui.input.submit")} submit amendment • ${keys("tui.select.cancel")} return to choices`
+                ? `${keys("tui.input.submit")} submit answer • ${keys("tui.select.cancel")} return to choices`
                 : multi
-                  ? `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} toggle • ${keys("tui.input.tab")} amend • Done submit • ${keys("tui.select.cancel")} cancel`
-                  : `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} select • ${keys("tui.input.tab")} amend • ${keys("tui.select.cancel")} cancel`,
+                  ? `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} toggle • ${keys("tui.input.tab")} to edit highlighted answer • Done submit • ${keys("tui.select.cancel")} cancel`
+                  : `${keys("tui.select.up")}/${keys("tui.select.down")} navigate • ${keys("tui.select.confirm")} select • ${keys("tui.input.tab")} to edit highlighted answer • ${keys("tui.select.cancel")} cancel`,
             ),
             1,
             0,
@@ -501,7 +505,7 @@ export default function askQuestion(pi: ExtensionAPI): void {
         const displays = options.map((option, index) =>
           optionDisplay(option, index),
         );
-        if (params.allowOther) displays.push(OTHER);
+        if (allowsOther(params)) displays.push(OTHER);
         const choice = await ctx.ui.select(params.question, displays, {
           signal,
         });
@@ -540,7 +544,7 @@ export default function askQuestion(pi: ExtensionAPI): void {
         const displays = options.map((option, index) =>
           optionDisplay(option, index, selected.has(index)),
         );
-        if (params.allowOther) displays.push(OTHER);
+        if (allowsOther(params)) displays.push(OTHER);
         displays.push(`${DONE} (${selected.size + custom.length} selected)`);
         const choice = await ctx.ui.select(params.question, displays, {
           signal,
