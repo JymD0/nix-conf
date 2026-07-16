@@ -163,6 +163,10 @@ in
     vlc
     thunderbird
 
+    # Windows compatibility (Insta360 Studio)
+    wineWow64Packages.stagingFull
+    winetricks
+
     # Fonts
     noto-fonts-color-emoji
     jetbrains-mono
