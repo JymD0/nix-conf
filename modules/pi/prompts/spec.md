@@ -38,7 +38,13 @@ Produce a concise draft containing:
 
 Keep requirements separate from implementation preferences. Label inferred details as assumptions.
 
-After presenting the draft, use `ask_question` to ask whether I want to:
+## Convergence gate
+
+Before offering approval, run a fresh `Critic` agent against the complete draft, the decisions made, and only the repository context needed to validate its assumptions. Count this initial critique as round one. Revise every blocking or material finding without expanding the agreed scope, then run another fresh Critic pass. Use at most three total Critic passes.
+
+The specification converges when no blocking or material findings remain, acceptance criteria are observable and testable, assumptions and non-goals are explicit, and no contradictory or unresolved architectural decision remains. Minor wording and optional improvements do not block convergence. If blocking or material findings remain after the third pass, use `ask_question` to escalate the smallest unresolved decision instead of continuing automatically. Do not label the specification approved before it converges unless I explicitly accept the remaining risk.
+
+Present the converged draft with a short `Convergence` note stating the number of passes and any non-blocking residual risks. Then use `ask_question` to ask whether I want to:
 
 - Approve the specification
 - Revise a specific section

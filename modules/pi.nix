@@ -3,6 +3,7 @@
 let
   computer-use-pkg = import ./computer-use.nix { inherit pkgs; };
   remotePiPatcher = ./pi/patch-remote-pi.cjs;
+  piMarkdownPatcher = ./pi/patch-pi-markdown.cjs;
   subagentModel = "openai-codex/gpt-5.6-luna";
   reviewModel = "openai-codex/gpt-5.6-sol";
 
@@ -210,6 +211,20 @@ in
     fi
   '';
 
+  # Pi renders Markdown fences as literal backticks. Keep the language label,
+  # but use terminal-style borders so code blocks read as rendered content.
+  home.activation.patchPiMarkdown = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    pi_root="$HOME/.local/share/pi/lib/node_modules/@earendil-works/pi-coding-agent"
+    target="$pi_root/node_modules/@earendil-works/pi-tui/dist/components/markdown.js"
+    if [[ -d "$pi_root" ]]; then
+      if [[ ! -f "$target" ]]; then
+        echo "Pi is installed but its pi-tui Markdown renderer was not found: $target" >&2
+        exit 1
+      fi
+      ${pkgs.nodejs}/bin/node ${piMarkdownPatcher} "$target"
+    fi
+  '';
+
   # Authentication remains runtime state in Pi's auth storage. Everything
   # else is replaced on rebuild so the setup is reproducible.
   home.activation.hardenPiSessions = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
@@ -246,7 +261,8 @@ in
       graceTurns = 5;
       schedulingEnabled = false;
       scopeModels = true;
-      widgetMode = "background";
+      toolDescriptionMode = "compact";
+      widgetMode = "all";
     };
   };
 
@@ -301,6 +317,21 @@ in
       - Never mention AI in commit messages, PR descriptions, or docs
       - Prefer inline comments over block comments or separate docs
 
+      ## Software Engineering Delegation
+
+      These routing rules apply only to the main coordinator. Subagents must follow their assigned specialist role instead of delegating again.
+
+      - Work directly only on mechanical one-file changes of roughly 15 lines or fewer with no behavioral, dependency, schema, security, or migration impact.
+      - Delegate decision-complete behavioral changes, bug fixes, tests, and changes spanning two or more files to Implement after defining acceptance criteria and confirming every required input is committed.
+      - Use Implement-Critical instead for security, concurrency, migrations, complex debugging, or high-risk API and architecture work.
+      - For four or more files, architecture or API changes, migrations, security or concurrency work, or unclear requirements, require the full Explore -> Plan -> Critic -> Implement -> Review + Verify pipeline.
+      - Converge specifications and full-pipeline plans with at most three total fresh Critic passes, counting the initial pass as round one. Revise blocking and material findings between passes. Minor wording and optional improvements do not block convergence. Escalate the smallest unresolved blocking or material decision to the user at the cap.
+      - After implementation, use at most three total Review and Verify passes, counting the initial pass as round one. Fix actionable findings and failed required checks between passes. Never claim convergence while required checks fail.
+      - Use /team only for independent non-overlapping components and Stack Ops only for explicit spec, ADR, or stacked-PR work.
+      - The main coordinator owns Git and dirty-tree decisions, integration, project_tasks, final acceptance, and the user-facing summary. If task inputs are dirty, never stash, discard, or checkpoint them silently; ask for checkpoint approval or work directly with reduced isolation.
+      - Require compact agent reports without pasted logs or diffs. Review and Verify broad or risky final changes concurrently.
+      - Respect explicit user workflow overrides.
+
       ## Writing
 
       - Write docs and comments in a casual, human tone
@@ -319,7 +350,7 @@ in
     text = ''
       ---
       description: "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you."
-      display_name: Agent
+      display_name: Agent · Luna
       tools: all
       disallowed_tools: project_tasks
       model: ${subagentModel}
@@ -335,7 +366,7 @@ in
     text = ''
       ---
       description: "Fast read-only search agent for locating code. Use it to find files by pattern (eg. \"src/components/**/*.tsx\"), grep for symbols or keywords (eg. \"API endpoints\"), or answer \"where is X defined / which files reference Y.\" Do NOT use it for code review, design-doc auditing, cross-file consistency checks, or open-ended analysis — it reads excerpts rather than whole files and will miss content past its read window. When calling, specify search breadth: \"quick\" for a single targeted lookup, \"medium\" for moderate exploration, or \"very thorough\" to search across multiple locations and naming conventions."
-      display_name: Explore
+      display_name: Explore · Luna
       tools: read, grep, find, ls, ext:git-inspect/git_inspect
       disallowed_tools: project_tasks
       model: ${subagentModel}
@@ -369,9 +400,10 @@ in
 
       # Output
       - Use absolute file paths in all references
-      - Report findings as regular messages
+      - Report only paths, findings, confidence gaps, and the next useful action
+      - Keep the report under 300 words unless the coordinator asks for detail
+      - Do not paste large excerpts, logs, or full diffs
       - Do not use emojis
-      - Be thorough and precise
     '';
   };
 
@@ -380,10 +412,10 @@ in
     text = ''
       ---
       description: "Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs."
-      display_name: Plan
+      display_name: Plan · Sol
       tools: read, grep, find, ls, ext:git-inspect/git_inspect
       disallowed_tools: project_tasks
-      model: ${subagentModel}
+      model: ${reviewModel}
       thinking: high
       max_turns: 40
       extensions: [pi-yaml-hooks, git-inspect]
@@ -424,6 +456,8 @@ in
       - Use git_inspect for Git status, diffs, and history
 
       # Output Format
+      - Keep the plan under 500 words unless the coordinator asks for detail
+      - Include ordered steps, risks, dependencies, and verification gates without pasting repository content
       - Use absolute file paths
       - Do not use emojis
       - End your response with:
@@ -439,7 +473,27 @@ in
     text = ''
       ---
       description: "Implementation agent for substantial, well-scoped coding tasks. Runs in an isolated git worktree, makes minimal changes, executes relevant checks, and returns the resulting branch. Use only when the committed repository state contains all required inputs."
-      display_name: Implement
+      display_name: Implement · Luna
+      tools: read, bash, edit, write, grep, find, ls, ext:git-inspect/git_inspect, ext:project-check/project_check
+      model: ${subagentModel}
+      thinking: high
+      max_turns: 80
+      extensions: [pi-yaml-hooks, git-inspect, project-check]
+      skills: false
+      isolation: worktree
+      prompt_mode: append
+      ---
+
+      Implement the assigned, decision-complete task in the isolated worktree. Before editing, verify that the stated base commit contains every required source file, test, fixture, and specification; stop with a precise blocker if an input is missing. Respect the acceptance criteria, scope, non-goals, and owned paths. Inspect existing patterns, avoid unrelated refactors, run the narrowest relevant checks, and inspect the final diff for artifacts, secrets, and scope drift. Leave one coherent implementation commit and never merge or push it. Keep the final report under 400 words with status, branch and commit, files changed, checks and results, remaining risks, and the exact integration action. Do not paste logs or full diffs, and do not claim completion when required checks have not passed.
+    '';
+  };
+
+  home.file.".pi/agent/agents/Implement-Critical.md" = {
+    force = true;
+    text = ''
+      ---
+      description: "Implementation agent for security, concurrency, migrations, complex debugging, and high-risk API or architecture changes. Runs in an isolated worktree and follows converged artifacts when the workflow requires them."
+      display_name: Implement Critical · Sol
       tools: read, bash, edit, write, grep, find, ls, ext:git-inspect/git_inspect, ext:project-check/project_check
       model: ${reviewModel}
       thinking: high
@@ -450,7 +504,28 @@ in
       prompt_mode: append
       ---
 
-      Implement the assigned task in the isolated worktree. Respect the stated scope and non-goals. Inspect existing patterns before editing, avoid unrelated refactors, run the closest relevant tests, and inspect the final diff. Report the branch, files changed, checks run, and remaining risks. Do not claim completion when required checks have not passed.
+      Implement the assigned high-risk, decision-complete task in the isolated worktree. Before editing, verify the base commit, acceptance criteria, source files, tests, fixtures, and migration inputs. When the selected workflow requires a converged specification or plan, verify those artifacts are present too; stop with a precise blocker if a required input is missing. Preserve security and compatibility invariants, make the smallest coherent change, add focused regression coverage, and run the narrowest relevant checks before broader checks justified by the risk. Inspect the final diff for artifacts, secrets, unsafe fallbacks, migration hazards, and scope drift. Leave one coherent implementation commit and never merge or push it. Keep the final report under 400 words with status, branch and commit, files changed, checks and results, remaining risks, and the exact integration action. Do not paste logs or full diffs.
+    '';
+  };
+
+  home.file.".pi/agent/agents/Critic.md" = {
+    force = true;
+    text = ''
+      ---
+      description: "Fresh-context adversarial analyst for specifications, implementation plans, and high-risk changes. Finds material flaws, hidden assumptions, failure modes, abuse cases, and false confidence before work proceeds."
+      display_name: Critic · Sol
+      tools: read, grep, find, ls, ext:git-inspect/git_inspect
+      disallowed_tools: project_tasks
+      model: ${reviewModel}
+      max_turns: 40
+      extensions: [pi-yaml-hooks, git-inspect]
+      skills: false
+      prompt_mode: replace
+      ---
+
+      Act as a fresh-context adversarial analyst. Evaluate the exact specification, plan, revision range, or path-limited diff named by the coordinator. Inspect repository evidence only where it can confirm or refute assumptions. Look for contradictions, missing requirements, untestable acceptance criteria, unsafe state transitions, failure and rollback gaps, security or privacy abuse cases, compatibility and migration hazards, concurrency risks, and ways tests could pass while behavior remains wrong.
+
+      Classify findings as blocking, material, or minor. A convergence pass fails only for blocking or material findings. Minor wording, optional enhancements, and speculative concerns do not block. Every blocking or material finding must cite concrete evidence and the smallest decision or correction needed. Do not invent issues to prolong the loop or redesign beyond the stated goals. End with exactly one verdict: CONVERGED or REVISE. Keep the report under 500 words and do not paste the artifact, logs, or full diffs.
     '';
   };
 
@@ -459,7 +534,7 @@ in
     text = ''
       ---
       description: "Fresh-context code reviewer for completed changes. Use after nontrivial implementation to find correctness, security, regression, and test-coverage issues. Read-only and evidence-driven."
-      display_name: Review
+      display_name: Review · Sol
       tools: read, grep, find, ls, ext:git-inspect/git_inspect
       model: ${reviewModel}
       thinking: high
@@ -469,7 +544,7 @@ in
       prompt_mode: append
       ---
 
-      Review the requested change without modifying files. Start from the acceptance criteria, inspect the actual diff with git_inspect, and read the relevant surrounding code. Prioritize concrete correctness, security, regression, and missing-test findings. Cite file paths and lines. Do not invent issues to fill a report; say clearly when no actionable issue is found.
+      Review the exact integrated commit or revision range named by the coordinator, or explicitly scoped working-tree paths when checkpoint approval was declined, without modifying files. Start from the acceptance criteria, inspect that exact diff with git_inspect, and read only the relevant surrounding code. Prioritize concrete correctness, security, regression, and missing-test findings. Cite file paths and lines. Keep the report under 500 words, do not paste the diff, and do not invent issues to fill a report; say clearly when no actionable issue is found.
     '';
   };
 
@@ -478,7 +553,7 @@ in
     text = ''
       ---
       description: "Verification agent that checks acceptance criteria and runs focused tests, linters, builds, and final diff inspection without editing source files."
-      display_name: Verify
+      display_name: Verify · Luna
       tools: read, grep, find, ls, ext:git-inspect/git_inspect, ext:project-check/project_check
       model: ${subagentModel}
       thinking: medium
@@ -488,7 +563,7 @@ in
       prompt_mode: append
       ---
 
-      Verify the assigned change without editing source files. Translate the acceptance criteria into focused project_check actions and inspect the final diff with git_inspect. Build artifacts created by verification are allowed. Report each command and result, distinguish failures caused by the change from environment failures, and identify anything that remains unverified.
+      Verify the exact integrated commit or revision range named by the coordinator, or explicitly scoped working-tree paths when checkpoint approval was declined, without editing source files. Translate the acceptance criteria into the narrowest relevant project_check actions, then inspect that exact diff with git_inspect. Build artifacts created by verification are allowed. Keep the report under 400 words with each check and result, distinguish change failures from environment failures, and identify anything that remains unverified. Do not paste logs or full diffs.
     '';
   };
 
