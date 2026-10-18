@@ -14,7 +14,6 @@
     ./modules/pi.nix
     ./modules/ai.nix
     ./modules/walker.nix
-    ./modules/insta360.nix
   ];
 
   home.username = user.username;
