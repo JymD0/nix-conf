@@ -513,6 +513,41 @@ in
       re='sudo[[:space:]]+rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f'
       [[ "$COMMAND" =~ $re ]] && block "Blocked: sudo recursive delete — ask the user first"
 
+      # Claude's own temp space: a single plain rm -r or git worktree
+      # remove/prune whose every target sits under /tmp/claude-1000/ is fine
+      # without asking. no chaining, pipes or substitutions and no .. anywhere,
+      # so it can't reach anything else
+      scratch_only() {
+        local cmd=$1 word targets=0
+        # newlines too, read below only sees the first line
+        [[ "$cmd" == *[\;\&\|\`\<\>]* || "$cmd" == *'$('* || "$cmd" == *..* || "$cmd" == *$'\n'* ]] && return 1
+        read -ra words <<<"$cmd"
+        case "''${words[0]}" in
+          rm)
+            for word in "''${words[@]:1}"; do
+              [[ "$word" == -* ]] && continue
+              [[ "$word" == /tmp/claude-1000/?* ]] || return 1
+              targets=$((targets + 1))
+            done
+            ((targets > 0))
+            ;;
+          git)
+            [[ "$cmd" =~ ^git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+worktree[[:space:]]+(remove|prune)([[:space:]]|$) ]] || return 1
+            [[ "''${BASH_REMATCH[2]}" == prune ]] && return 0
+            for word in "''${words[@]:1}"; do
+              [[ "$word" == -* || "$word" == worktree || "$word" == remove ]] && continue
+              [[ "$word" == /tmp/claude-1000/?* ]] && { targets=$((targets + 1)); continue; }
+              # the -C repo argument itself
+              [[ -d "$word" ]] && continue
+              return 1
+            done
+            ((targets > 0))
+            ;;
+          *) return 1 ;;
+        esac
+      }
+      scratch_only "$COMMAND" && exit 0
+
       # Git destructive operations
       re='git[[:space:]]+push[[:space:]]'
       if [[ "$COMMAND" =~ $re ]]; then
