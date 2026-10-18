@@ -141,17 +141,6 @@ in
         ${pkgs.kmod}/bin/modprobe -r mt7921e && ${pkgs.kmod}/bin/modprobe mt7921e
         # Reload touchpad driver (I2C HID)
         ${pkgs.kmod}/bin/modprobe -r i2c_hid_acpi && ${pkgs.kmod}/bin/modprobe i2c_hid_acpi
-
-        # Re-apply ALC295 mic fix in case the codec re-inits after resume
-        sleep 2
-        for codec in /proc/asound/card*/codec#*; do
-          if grep -q "ALC295" "$codec" 2>/dev/null; then
-            CARD=$(echo "$codec" | grep -oP 'card\K[0-9]+')
-            ${pkgs.alsa-utils}/bin/amixer -c "$CARD" sset 'Mic Boost' 1
-            ${pkgs.alsa-utils}/bin/amixer -c "$CARD" sset 'Capture' 25
-            break
-          fi
-        done
       '';
     };
   };

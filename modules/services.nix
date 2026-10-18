@@ -273,21 +273,23 @@ let
     fi
   '';
 
-  # ALC295 mic fix — tames the +30 dB defaults that cause clipping.
-  # Runs after WirePlumber so it doesn't get overridden by state restoration.
+  # ALC295 mic setup. WirePlumber drives the ALSA capture control itself, so
+  # poking it with amixer here just gets overwritten a moment later. Go through
+  # wpctl instead. The unmute matters most: a stray mic-mute keypress sticks
+  # across reboots once WirePlumber saves it, and apps then see a dead device.
   micFixScript = pkgs.writeShellScript "mic-fix-alc295" ''
+    set -euo pipefail
+
     # wait for WirePlumber to finish restoring state
     sleep 2
 
-    for codec in /proc/asound/card*/codec#*; do
-      if grep -q "ALC295" "$codec" 2>/dev/null; then
-        CARD=$(echo "$codec" | grep -oP 'card\K[0-9]+')
-        ${pkgs.alsa-utils}/bin/amixer -c "$CARD" sset 'Mic Boost' 1
-        ${pkgs.alsa-utils}/bin/amixer -c "$CARD" sset 'Capture' 25
-        ${pkgs.wireplumber}/bin/wpctl set-volume @DEFAULT_SOURCE@ 0.40
-        break
-      fi
-    done
+    ${pkgs.wireplumber}/bin/wpctl set-mute @DEFAULT_SOURCE@ 0
+
+    # only force the level for the built-in mic, leave headsets where they are
+    SOURCE_INFO=$(${pkgs.wireplumber}/bin/wpctl inspect @DEFAULT_SOURCE@)
+    case "$SOURCE_INFO" in
+      *ALC295*) ${pkgs.wireplumber}/bin/wpctl set-volume @DEFAULT_SOURCE@ 0.27 ;;
+    esac
   '';
 
   # Sleep inhibitor for performance profile. Holds a systemd sleep inhibitor
@@ -379,7 +381,7 @@ in
   # ─── ALC295 mic fix (runs after WirePlumber to survive state restoration) ────
   systemd.user.services.mic-fix-alc295 = {
     Unit = {
-      Description = "Fix ALC295 mic clipping (tame boost + capture)";
+      Description = "Unmute and level the ALC295 mic";
       After = [ "wireplumber.service" ];
       Requires = [ "wireplumber.service" ];
     };
