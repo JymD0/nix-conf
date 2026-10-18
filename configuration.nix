@@ -96,6 +96,21 @@ in
   hardware.bluetooth.enable = true;
   hardware.bluetooth.powerOnBoot = true;
 
+  # MT7921 bluetooth adapter loses firmware after suspend; reload the driver on resume
+  systemd.services.bluetooth-resume = {
+    description = "Reload btusb after resume";
+    after = [ "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
+    wantedBy = [ "suspend.target" "hibernate.target" "hybrid-sleep.target" "suspend-then-hibernate.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      # ExecStart isn't a shell, so no && here; oneshot runs these in order
+      ExecStart = [
+        "${pkgs.kmod}/bin/modprobe -r btusb"
+        "${pkgs.kmod}/bin/modprobe btusb"
+      ];
+    };
+  };
+
   # i2c access for ddcutil (external monitor brightness via DDC/CI)
   hardware.i2c.enable = true;
 
