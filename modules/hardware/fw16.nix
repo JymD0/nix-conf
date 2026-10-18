@@ -32,8 +32,9 @@ in
     "resume_offset=5408768"
   ];
 
-  # Machine-specific hibernate resume device
-  boot.resumeDevice = "/dev/nvme1n1p5";
+  # Root fs holding /swapfile. Has to be by-uuid, the two NVMe drives swap
+  # nvme0/nvme1 names between boots so a /dev/nvmeXn1p5 path breaks hibernate
+  boot.resumeDevice = "/dev/disk/by-uuid/6f9e464f-32ae-4318-83df-d069de19090a";
 
   # Prevent wake in backpack (Framework USB VID 32ac) + EPP power tuning
   services.udev.extraRules = lib.mkAfter ''
@@ -107,6 +108,18 @@ in
   systemd.sleep.settings.Sleep = {
     HibernateDelaySec = "30m";
   };
+
+  # Let the active user hibernate even when block inhibitors are held
+  # (power menu and critical-battery auto-hibernate both need this)
+  security.polkit.extraConfig = ''
+    polkit.addRule(function(action, subject) {
+      if ((action.id == "org.freedesktop.login1.hibernate-ignore-inhibit" ||
+           action.id == "org.freedesktop.login1.hibernate") &&
+          subject.isInGroup("wheel") && subject.active) {
+        return polkit.Result.YES;
+      }
+    });
+  '';
 
   # Lid switch: suspend-then-hibernate on battery, lock when plugged in
   services.logind.settings.Login = {

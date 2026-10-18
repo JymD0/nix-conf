@@ -52,7 +52,7 @@ let
       echo 5 > "$STATE_FILE"
       sleep 30
       kill "$LED_PID" 2>/dev/null
-      systemctl hibernate
+      systemctl hibernate --check-inhibitors=no
     elif [ "$CAPACITY" -le 10 ] && [ "$LAST" -gt 10 ]; then
       ${pkgs.libnotify}/bin/notify-send -u critical -t 0 "󰁻 Battery Low" "At ''${CAPACITY}% — please plug in"
       ${ledmatrix-pkg}/bin/ledmatrix-battery --battery "$CAPACITY" &
