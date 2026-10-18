@@ -33,6 +33,9 @@ def _read_active():
         return None, None
 
 
+_LOCK_FILE = _ACTIVE_FILE + ".lock"
+
+
 @contextlib.contextmanager
 def claim(priority):
     """Claim the display at a given priority level.
@@ -40,9 +43,14 @@ def claim(priority):
     Yields True if the caller should run, False if a higher-priority effect
     is already active and the caller should skip.
     """
+    lock_fd = open(_LOCK_FILE, "w")
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
     active_prio, active_pid = _read_active()
 
     if active_prio is not None and active_prio < priority:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
         yield False
         return
 
@@ -51,20 +59,30 @@ def claim(priority):
             os.kill(active_pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-        time.sleep(0.1)
+        for _ in range(50):
+            try:
+                os.kill(active_pid, 0)
+                time.sleep(0.02)
+            except ProcessLookupError:
+                break
 
     with open(_ACTIVE_FILE, "w") as f:
         f.write(f"{priority} {os.getpid()}")
 
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+
     try:
         yield True
     finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
         _, pid = _read_active()
         if pid == os.getpid():
             try:
                 os.unlink(_ACTIVE_FILE)
             except OSError:
                 pass
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
 
 
 # 4x4 Bayer ordered dithering matrix (values 0-15)
