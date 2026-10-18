@@ -1,4 +1,9 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 let
   ledmatrix-pkg = pkgs.python3.pkgs.buildPythonApplication {
@@ -14,76 +19,76 @@ in
 {
   # ─── Variety setup (mutable files — variety needs chmod and write access) ────
   home.activation.varietySetup = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-    variety_dir="$HOME/.config/variety"
-    scripts_dir="$variety_dir/scripts"
-    mkdir -p "$scripts_dir" "$variety_dir/Downloaded" "$variety_dir/Favorites" "$variety_dir/Fetched"
+        variety_dir="$HOME/.config/variety"
+        scripts_dir="$variety_dir/scripts"
+        mkdir -p "$scripts_dir" "$variety_dir/Downloaded" "$variety_dir/Favorites" "$variety_dir/Fetched"
 
-    # Only write config if not yet present (let variety manage it after first deploy)
-    if [ ! -f "$variety_dir/variety.conf" ] || [ -L "$variety_dir/variety.conf" ]; then
-      rm -f "$variety_dir/variety.conf"
-      cat > "$variety_dir/variety.conf" << 'CONF'
-# Wallpaper change settings
-change_enabled = True
-change_on_start = True
-change_interval = 1800
+        # Only write config if not yet present (let variety manage it after first deploy)
+        if [ ! -f "$variety_dir/variety.conf" ] || [ -L "$variety_dir/variety.conf" ]; then
+          rm -f "$variety_dir/variety.conf"
+          cat > "$variety_dir/variety.conf" << 'CONF'
+    # Wallpaper change settings
+    change_enabled = True
+    change_on_start = True
+    change_interval = 1800
 
-# Download settings
-download_enabled = True
-download_interval = 60
-download_folder = ~/.config/variety/Downloaded
-quota_enabled = True
-quota_size = 500
+    # Download settings
+    download_enabled = True
+    download_interval = 60
+    download_folder = ~/.config/variety/Downloaded
+    quota_enabled = True
+    quota_size = 500
 
-# Folders
-favorites_folder = ~/.config/variety/Favorites
-fetched_folder = ~/.config/variety/Fetched
+    # Folders
+    favorites_folder = ~/.config/variety/Favorites
+    fetched_folder = ~/.config/variety/Fetched
 
-# Image filtering
-safe_mode = True
-min_size_enabled = True
-min_size = 80
-use_landscape_enabled = True
-lightness_enabled = False
+    # Image filtering
+    safe_mode = True
+    min_size_enabled = True
+    min_size = 80
+    use_landscape_enabled = True
+    lightness_enabled = False
 
-[sources]
-src1 = True|favorites|The Favorites folder
-src2 = True|fetched|The Fetched folder
-src3 = True|unsplash|High-resolution photos from Unsplash.com
-src4 = True|bing|Bing Photo of the Day
-src5 = True|wallhaven|nature dark
-src6 = True|wallhaven|landscape
-src7 = False|apod|NASA's Astronomy Picture of the Day
-src8 = False|desktoppr|Random wallpapers from Desktoppr.co
-src9 = False|earth|World Sunlight Map - live wallpaper from Die.net
+    [sources]
+    src1 = True|favorites|The Favorites folder
+    src2 = True|fetched|The Fetched folder
+    src3 = True|unsplash|High-resolution photos from Unsplash.com
+    src4 = True|bing|Bing Photo of the Day
+    src5 = True|wallhaven|nature dark
+    src6 = True|wallhaven|landscape
+    src7 = False|apod|NASA's Astronomy Picture of the Day
+    src8 = False|desktoppr|Random wallpapers from Desktoppr.co
+    src9 = False|earth|World Sunlight Map - live wallpaper from Die.net
 
-[filters]
-CONF
+    [filters]
+    CONF
+        fi
+
+        cat > "$scripts_dir/set_wallpaper" << 'SCRIPT'
+    #!/bin/sh
+    if [ -z "$1" ]; then
+      exit 1
     fi
+    ${pkgs.awww}/bin/awww img "$1" \
+      --transition-type fade \
+      --transition-duration 1 \
+      --transition-fps 60
+    ln -sf "$1" "$HOME/.current-wallpaper"
+    SCRIPT
+        chmod +x "$scripts_dir/set_wallpaper"
 
-    cat > "$scripts_dir/set_wallpaper" << 'SCRIPT'
-#!/bin/sh
-if [ -z "$1" ]; then
-  exit 1
-fi
-${pkgs.awww}/bin/awww img "$1" \
-  --transition-type fade \
-  --transition-duration 1 \
-  --transition-fps 60
-ln -sf "$1" "$HOME/.current-wallpaper"
-SCRIPT
-    chmod +x "$scripts_dir/set_wallpaper"
+        cat > "$scripts_dir/get_wallpaper" << 'SCRIPT'
+    #!/bin/sh
+    ${pkgs.awww}/bin/awww query | grep -oP 'image: \K.*' | head -1
+    SCRIPT
+        chmod +x "$scripts_dir/get_wallpaper"
 
-    cat > "$scripts_dir/get_wallpaper" << 'SCRIPT'
-#!/bin/sh
-${pkgs.awww}/bin/awww query | grep -oP 'image: \K.*' | head -1
-SCRIPT
-    chmod +x "$scripts_dir/get_wallpaper"
-
-    cat > "$scripts_dir/set_lock_screen" << 'SCRIPT'
-#!/bin/sh
-exit 0
-SCRIPT
-    chmod +x "$scripts_dir/set_lock_screen"
+        cat > "$scripts_dir/set_lock_screen" << 'SCRIPT'
+    #!/bin/sh
+    exit 0
+    SCRIPT
+        chmod +x "$scripts_dir/set_lock_screen"
   '';
 
   # ─── SwayOSD (on-screen display for volume/brightness) ────────────────────────
@@ -131,7 +136,8 @@ SCRIPT
             border: none;
           }
         '';
-      in "${css}";
+      in
+      "${css}";
   };
 
   # ─── SwayNC (notification center) ──────────────────────────────────────────
@@ -152,7 +158,7 @@ SCRIPT
 
       timeout = 8;
       timeout-low = 4;
-      timeout-critical = 0;
+      timeout-critical = 30;
 
       fit-to-screen = true;
       control-center-width = 400;
@@ -176,13 +182,12 @@ SCRIPT
       };
 
       scripts = {
-        "notification-sound" = {
-          exec = "${pkgs.libcanberra-gtk3}/bin/canberra-gtk-play -i message-new-instant -d notification";
-          app-name = ".*";
-          run-on = "receive";
-        };
-        "ledmatrix-notify" = {
-          exec = "${ledmatrix-pkg}/bin/ledmatrix-notify envelope";
+        "notification-actions" = {
+          exec = "${pkgs.writeShellScript "swaync-notify" ''
+            ${pkgs.libcanberra-gtk3}/bin/canberra-gtk-play -i message-new-instant -d notification &
+            ${ledmatrix-pkg}/bin/ledmatrix-notify envelope &
+            wait
+          ''}";
           app-name = ".*";
           run-on = "receive";
         };
@@ -408,25 +413,29 @@ SCRIPT
         grace = 3;
       };
 
-      background = [{
-        path = "${config.home.homeDirectory}/.current-wallpaper";
-        crossfade_time = 1.5;
-      }];
+      background = [
+        {
+          path = "${config.home.homeDirectory}/.current-wallpaper";
+          crossfade_time = 1.5;
+        }
+      ];
 
       # ── Blurred box behind widgets ──────────────────────────────────────
-      shape = [{
-        size = "460, 440";
-        color = "rgba(40, 42, 54, 0.55)";
-        rounding = 24;
-        blur_size = 6;
-        blur_passes = 3;
-        noise = 0.01;
-        border_size = 2;
-        border_color = "rgba(189, 147, 249, 0.25)";
-        position = "0, 15";
-        halign = "center";
-        valign = "center";
-      }];
+      shape = [
+        {
+          size = "460, 440";
+          color = "rgba(40, 42, 54, 0.55)";
+          rounding = 24;
+          blur_size = 6;
+          blur_passes = 3;
+          noise = 0.01;
+          border_size = 2;
+          border_color = "rgba(189, 147, 249, 0.25)";
+          position = "0, 15";
+          halign = "center";
+          valign = "center";
+        }
+      ];
 
       # ── Clock ──────────────────────────────────────────────────────────
       label = [
@@ -477,25 +486,27 @@ SCRIPT
       };
 
       # ── Password field ─────────────────────────────────────────────────
-      input-field = [{
-        size = "340, 50";
-        outline_thickness = 2;
-        dots_size = 0.22;
-        dots_spacing = 0.35;
-        outer_color = "rgb(189, 147, 249)";
-        inner_color = "rgb(68, 71, 90)";
-        font_color = "rgb(248, 248, 242)";
-        check_color = "rgb(80, 250, 123)";
-        fail_color = "rgb(255, 85, 85)";
-        capslock_color = "rgb(241, 250, 140)";
-        rounding = 12;
-        fade_on_empty = false;
-        placeholder_text = ''<span foreground="##6272a4">  Password</span>'';
-        fail_text = ''<i>$FAIL  <b>($ATTEMPTS)</b></i>'';
-        position = "0, -110";
-        halign = "center";
-        valign = "center";
-      }];
+      input-field = [
+        {
+          size = "340, 50";
+          outline_thickness = 2;
+          dots_size = 0.22;
+          dots_spacing = 0.35;
+          outer_color = "rgb(189, 147, 249)";
+          inner_color = "rgb(68, 71, 90)";
+          font_color = "rgb(248, 248, 242)";
+          check_color = "rgb(80, 250, 123)";
+          fail_color = "rgb(255, 85, 85)";
+          capslock_color = "rgb(241, 250, 140)";
+          rounding = 12;
+          fade_on_empty = false;
+          placeholder_text = ''<span foreground="##6272a4">  Password</span>'';
+          fail_text = "<i>$FAIL  <b>($ATTEMPTS)</b></i>";
+          position = "0, -110";
+          halign = "center";
+          valign = "center";
+        }
+      ];
     };
   };
 
@@ -524,8 +535,10 @@ SCRIPT
           on-resume = "hyprctl dispatch dpms on";
         }
         {
-          timeout = 1800; # 30 min — skip suspend when performance profile is active
-          on-timeout = "powerprofilesctl get | grep -q performance || systemctl suspend-then-hibernate";
+          # 30 min idle. Skip suspend on AC or while the performance profile is active,
+          # same idea as the lid rule (lock only when plugged in)
+          timeout = 1800;
+          on-timeout = "powerprofilesctl get | grep -q performance || grep -q 1 /sys/class/power_supply/ACAD/online || systemctl suspend-then-hibernate";
         }
       ];
     };
@@ -540,30 +553,69 @@ SCRIPT
       {
         profile.name = "laptop";
         profile.outputs = [
-          { criteria = "eDP-1"; status = "enable"; }
+          {
+            criteria = "eDP-1";
+            # Pin the panel to the origin. Without an explicit position kanshi
+            # leaves whatever the last desk profile set (0,1440), so undocking
+            # keeps a 1440px dead band above the screen in layout space.
+            # Sunshine sizes its absolute pointer range to that whole box
+            # (2560x3040) instead of the panel, which makes the remote cursor
+            # stop around the middle of the screen.
+            position = "0,0";
+            status = "enable";
+          }
         ];
       }
       {
         profile.name = "desk-msi";
         profile.outputs = [
-          { criteria = "DP-2"; position = "0,0"; status = "enable"; }
-          { criteria = "eDP-1"; position = "0,1440"; status = "enable"; }
+          {
+            criteria = "DP-2";
+            position = "0,0";
+            status = "enable";
+          }
+          {
+            criteria = "eDP-1";
+            position = "0,1440";
+            status = "enable";
+          }
         ];
       }
       {
         profile.name = "desk-acer";
         profile.outputs = [
-          { criteria = "DP-4"; position = "0,0"; status = "enable"; }
-          { criteria = "eDP-1"; position = "0,1440"; status = "enable"; }
+          {
+            criteria = "DP-4";
+            position = "0,0";
+            status = "enable";
+          }
+          {
+            criteria = "eDP-1";
+            position = "0,1440";
+            status = "enable";
+          }
         ];
       }
       # Acer on the left (rotated 90°), MSI top-right, laptop below MSI.
       {
         profile.name = "triple";
         profile.outputs = [
-          { criteria = "DP-4"; position = "0,0"; transform = "90"; status = "enable"; }
-          { criteria = "DP-2"; position = "1440,0"; status = "enable"; }
-          { criteria = "eDP-1"; position = "1440,1440"; status = "enable"; }
+          {
+            criteria = "DP-4";
+            position = "0,0";
+            transform = "90";
+            status = "enable";
+          }
+          {
+            criteria = "DP-2";
+            position = "1440,0";
+            status = "enable";
+          }
+          {
+            criteria = "eDP-1";
+            position = "1440,1440";
+            status = "enable";
+          }
         ];
       }
     ];
@@ -573,12 +625,12 @@ SCRIPT
   gtk = {
     enable = true;
     theme = {
-      name    = "Adwaita-dark";
+      name = "Adwaita-dark";
       package = pkgs.gnome-themes-extra;
     };
     gtk4.theme = config.gtk.theme;
     iconTheme = {
-      name    = "Papirus-Dark";
+      name = "Papirus-Dark";
       package = pkgs.papirus-icon-theme;
     };
   };
