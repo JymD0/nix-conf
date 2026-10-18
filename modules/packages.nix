@@ -15,6 +15,12 @@ let
     set -euo pipefail
     trap '${ledmatrix-pkg}/bin/ledmatrix-unlock unlock &' EXIT
     ${ledmatrix-pkg}/bin/ledmatrix-unlock lock &
+
+    # wake fprintd so the reader is ready by the time hyprlock asks for it
+    ${pkgs.dbus}/bin/dbus-send --system --print-reply --dest=net.reactivated.Fprint \
+      /net/reactivated/Fprint/Manager net.reactivated.Fprint.Manager.GetDevices \
+      >/dev/null 2>&1 || true
+
     ${pkgs.hyprlock}/bin/hyprlock "$@"
   '';
 
