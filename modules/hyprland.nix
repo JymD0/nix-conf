@@ -272,6 +272,55 @@ let
     hyprctl dispatch submap ledmatrix
   '';
 
+  # Fuzzel picker for ~/Projects, then a second menu for what to open there
+  projectMenu = pkgs.writeShellScript "project-menu" ''
+    set -euo pipefail
+    FUZZEL="${pkgs.fuzzel}/bin/fuzzel"
+    DIR="$HOME/Projects"
+    STATE="''${XDG_STATE_HOME:-$HOME/.local/state}/project-menu-recent"
+
+    # last used through this menu first, everything else newest-modified below
+    all=$(find "$DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@\t%f\n' \
+      | sort -rn | cut -f2-)
+    recent=""
+    rest="$all"
+    if [ -f "$STATE" ]; then
+      recent=$(while IFS= read -r p; do
+        [ -d "$DIR/$p" ] && printf '%s\n' "$p"
+      done < "$STATE") || true
+      rest=$(printf '%s\n' "$all" | grep -Fxv -f "$STATE" || true)
+    fi
+
+    proj=$(printf '+ New Project\n%s\n%s\n' "$recent" "$rest" | awk 'NF' \
+      | $FUZZEL --dmenu --prompt "Project  " || true)
+    [ -z "$proj" ] && exit 0
+
+    if [ "$proj" = "+ New Project" ]; then
+      proj=$(echo "" | $FUZZEL --dmenu --prompt "Name  " || true)
+      [ -z "$proj" ] && exit 0
+      mkdir -p "$DIR/$proj"
+    fi
+    path="$DIR/$proj"
+
+    action=$(printf "New Claude Session\nResume Claude Session\nNew Pi Session\nResume Pi Session\nTerminal\nFile Explorer" \
+      | $FUZZEL --dmenu --prompt "$proj  " || true)
+    [ -z "$action" ] && exit 0
+
+    # bump the picked project to the top of the recency list
+    mkdir -p "$(dirname "$STATE")"
+    { printf '%s\n' "$proj"; grep -Fxv "$proj" "$STATE" 2>/dev/null || true; } > "$STATE.tmp"
+    mv "$STATE.tmp" "$STATE"
+
+    case "$action" in
+      "New Claude Session")    kitty --working-directory "$path" claude --dangerously-skip-permissions & ;;
+      "Resume Claude Session") kitty --working-directory "$path" claude --resume --dangerously-skip-permissions & ;;
+      "New Pi Session")        kitty --working-directory "$path" pi & ;;
+      "Resume Pi Session")     kitty --working-directory "$path" pi --resume & ;;
+      Terminal)                kitty --working-directory "$path" & ;;
+      "File Explorer")         nemo "$path" & ;;
+    esac
+  '';
+
 in
 {
   wayland.windowManager.hyprland = {
@@ -422,6 +471,7 @@ in
         "$mod, E, exec, nemo"
         "$mod, V, exec, cliphist list | fuzzel --dmenu | cliphist decode | wl-copy"
         "$mod, R, exec, fuzzel"
+        "$mod, T, exec, ${projectMenu}"
         "$mod, P, pseudo,"
         "$mod, O, layoutmsg, togglesplit"
 
