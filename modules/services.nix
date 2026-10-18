@@ -210,6 +210,85 @@ let
     done
   '';
 
+  # Clipboard bridge for an active Sunshine session. Deliberately not a
+  # WantedBy=graphical-session service: the watcher below starts it on
+  # CLIENT CONNECTED and stops it on CLIENT DISCONNECTED, so the port only
+  # exists while someone is actually streaming.
+  clipboardBridgeScript = pkgs.writeScript "sunshine-clipboard-bridge" ''
+    #!${pkgs.python3}/bin/python3
+    # Left out of allowedTCPPorts on purpose. That leaves it reachable over
+    # tailscale0 (a trusted interface) but blocked from the LAN, and a shared
+    # token is still required so a stray tailnet device cannot read along.
+    import hmac
+    import http.server
+    import os
+    import secrets
+    import subprocess
+
+    PORT = 48020
+    MAX_BODY = 1 << 20
+    WL_COPY = "${pkgs.wl-clipboard}/bin/wl-copy"
+    WL_PASTE = "${pkgs.wl-clipboard}/bin/wl-paste"
+
+
+    def load_token():
+        base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+        state = os.path.join(base, "sunshine-clipboard")
+        os.makedirs(state, mode=0o700, exist_ok=True)
+        path = os.path.join(state, "token")
+        if not os.path.exists(path):
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as handle:
+                handle.write(secrets.token_urlsafe(32))
+        with open(path) as handle:
+            return handle.read().strip()
+
+
+    TOKEN = load_token()
+
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        server_version = "sunshine-clipboard"
+
+        def allowed(self):
+            if self.path != "/clip":
+                return False
+            got = self.headers.get("X-Token", "")
+            try:
+                return hmac.compare_digest(got.encode("ascii"), TOKEN.encode("ascii"))
+            except UnicodeError:
+                return False
+
+        def do_GET(self):
+            if not self.allowed():
+                self.send_error(403)
+                return
+            body = subprocess.run([WL_PASTE, "-n"], capture_output=True).stdout
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            if not self.allowed():
+                self.send_error(403)
+                return
+            size = int(self.headers.get("Content-Length") or 0)
+            if size < 1 or size > MAX_BODY:
+                self.send_error(413)
+                return
+            subprocess.run([WL_COPY], input=self.rfile.read(size))
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, fmt, *args):
+            pass
+
+
+    http.server.ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+  '';
+
   # Sunshine session watcher: suppresses hypridle and holds a sleep inhibitor
   # while a Moonlight client is connected. Tails the Sunshine journal for
   # CLIENT CONNECTED / CLIENT DISCONNECTED events. Also inhibits lid-switch
@@ -243,21 +322,26 @@ let
       fi
     }
 
-    trap 'release_idle; exit 0' EXIT INT TERM
+    clipboard_on() { systemctl --user start sunshine-clipboard.service 2>/dev/null || true; }
+    clipboard_off() { systemctl --user stop sunshine-clipboard.service 2>/dev/null || true; }
+
+    trap 'release_idle; clipboard_off; exit 0' EXIT INT TERM
 
     # recover state if restarting mid-session
-    LAST=$(${pkgs.systemd}/bin/journalctl --user -u sunshine --no-pager -o cat -n 200 2>/dev/null \
+    LAST=$(${pkgs.systemd}/bin/journalctl --user -u sunshine --no-pager -o cat -b -n 200 2>/dev/null \
       | grep -E "CLIENT (CONNECTED|DISCONNECTED)" | tail -1 || true)
-    case "$LAST" in *"CLIENT CONNECTED"*) suppress_idle ;; esac
+    case "$LAST" in *"CLIENT CONNECTED"*) suppress_idle; clipboard_on ;; esac
 
     ${pkgs.systemd}/bin/journalctl --user -u sunshine -f -o cat --no-hostname | while IFS= read -r line; do
       case "$line" in
         *"CLIENT CONNECTED"*)
           suppress_idle
+          clipboard_on
           ${ledmatrix-pkg}/bin/ledmatrix-notify bell &
           ;;
         *"CLIENT DISCONNECTED"*)
           release_idle
+          clipboard_off
           ${ledmatrix-pkg}/bin/ledmatrix-notify bell &
           ;;
       esac
@@ -266,6 +350,7 @@ let
 
   # Safety net: cleans up the suppress flag even after SIGKILL
   sunshineWatcherCleanup = pkgs.writeShellScript "sunshine-watcher-cleanup" ''
+    systemctl --user stop sunshine-clipboard.service 2>/dev/null || true
     SUPPRESS_DIR="''${XDG_RUNTIME_DIR:-/tmp}/hypridle-suppress"
     rm -f "$SUPPRESS_DIR/sunshine"
     if [ -z "$(ls -A "$SUPPRESS_DIR" 2>/dev/null)" ]; then
@@ -548,6 +633,22 @@ in
       RestartSec = "5s";
     };
     Install.WantedBy = [ "graphical-session.target" ];
+  };
+
+  # Clipboard bridge, started and stopped by the session watcher below.
+  # No Install.WantedBy on purpose, so it never runs outside a session.
+  systemd.user.services.sunshine-clipboard = {
+    Unit = {
+      Description = "Clipboard bridge for the active Sunshine session";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "sunshine-session-watcher.service" ];
+    };
+    Service = {
+      Type = "simple";
+      ExecStart = "${clipboardBridgeScript}";
+      Restart = "on-failure";
+      RestartSec = "2s";
+    };
   };
 
   # Sunshine session watcher: suppress idle/sleep while streaming
