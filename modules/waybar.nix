@@ -60,13 +60,83 @@ let
     echo "{\"text\": \"$PCT%\", \"tooltip\": \"External brightness: $PCT%\"}"
   '';
 
+  sleepScript = pkgs.writeShellScript "waybar-sleep" ''
+    set -euo pipefail
+
+    SYSTEMCTL=${pkgs.systemd}/bin/systemctl
+    POWERPROFILESCTL=${pkgs.power-profiles-daemon}/bin/powerprofilesctl
+    NOTIFY_SEND=${pkgs.libnotify}/bin/notify-send
+    RESTORE_SERVICE=0
+
+    notify_failure() {
+      local detail="''${2:-No diagnostics were reported.}"
+      detail="''${detail:0:500}"
+      "$NOTIFY_SEND" -u critical -t 10000 "$1" "$detail" >/dev/null 2>&1 || true
+    }
+
+    cleanup() {
+      local status="$1"
+      local restore_output
+      local restore_status
+
+      trap - EXIT HUP INT TERM
+      if [ "$RESTORE_SERVICE" -eq 1 ]; then
+        RESTORE_SERVICE=0
+        if restore_output=$("$SYSTEMCTL" --user start performance-sleep-inhibitor.service 2>&1); then
+          :
+        else
+          restore_status=$?
+          notify_failure "Sleep inhibitor restoration failed" "$restore_output"
+          if [ "$status" -eq 0 ]; then
+            status="$restore_status"
+          fi
+        fi
+      fi
+      exit "$status"
+    }
+
+    trap 'cleanup $?' EXIT
+    trap 'cleanup 129' HUP
+    trap 'cleanup 130' INT
+    trap 'cleanup 143' TERM
+
+    LOCK_FILE="''${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set}/waybar-sleep.lock"
+    exec 9>"$LOCK_FILE"
+    if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
+      notify_failure "Sleep already in progress" "Another power-menu Sleep request is still running."
+      exit 1
+    fi
+
+    PROFILE=""
+    if PROFILE=$("$POWERPROFILESCTL" get 2>/dev/null) \
+        && [ "$PROFILE" = "performance" ] \
+        && "$SYSTEMCTL" --user is-active --quiet performance-sleep-inhibitor.service; then
+      RESTORE_SERVICE=1
+      if stop_output=$("$SYSTEMCTL" --user stop performance-sleep-inhibitor.service 2>&1); then
+        :
+      else
+        stop_status=$?
+        notify_failure "Sleep inhibitor stop failed" "$stop_output"
+        exit "$stop_status"
+      fi
+    fi
+
+    if sleep_output=$("$SYSTEMCTL" suspend --check-inhibitors=yes 2>&1); then
+      :
+    else
+      sleep_status=$?
+      notify_failure "Sleep failed" "$sleep_output"
+      exit "$sleep_status"
+    fi
+  '';
+
   powerMenu = pkgs.writeShellScript "power-menu" ''
     choice=$(printf '󰌾  Lock\n󰈈  Work Mode\n󰒲  Sleep\n󰍃  Log out\n󰋊  Hibernate\n󰑓  Reboot\n󰐥  Shut down' | \
       fuzzel --dmenu --prompt '⏻  ' --width 24 --lines 7 --no-icons)
     case "$choice" in
       *Lock*)        hyprlock-led ;;
       *"Work Mode"*) work-mode ;;
-      *Sleep*)       systemctl suspend-then-hibernate ;;
+      *Sleep*)       ${sleepScript} ;;
       *"Log out"*)   hyprctl dispatch exit 0 ;;
       *Hibernate*)
         notify-send -u critical -i system-hibernate "Hibernating…" "Saving RAM to disk"
@@ -113,8 +183,27 @@ let
 
   # ActivityWatch — time tracking waybar module (AFK-filtered via query API)
   timetrackScript = pkgs.writeShellScript "timetrack" ''
+    set -euo pipefail
     JQ=${pkgs.jq}/bin/jq
     CURL=${pkgs.curl}/bin/curl
+    SYSTEMCTL=${pkgs.systemd}/bin/systemctl
+
+    if WATCHER_STATE=$("$SYSTEMCTL" --user show --property=ActiveState --value aw-awatcher.service 2>/dev/null); then
+      case "$WATCHER_STATE" in
+        active) ;;
+        inactive)
+          printf '{"text":"󰒲 Paused","tooltip":"ActivityWatch paused. Right-click to resume recording","class":"paused"}\n'
+          exit 0
+          ;;
+        *)
+          printf '{"text":"󱎫 ?","tooltip":"ActivityWatch watcher is %s","class":"error"}\n' "$WATCHER_STATE"
+          exit 0
+          ;;
+      esac
+    else
+      printf '{"text":"󱎫 ?","tooltip":"ActivityWatch status unavailable","class":"error"}\n'
+      exit 0
+    fi
 
     TODAY=$(date +%Y-%m-%dT00:00:00%:z)
     NOW=$(date +%Y-%m-%dT%H:%M:%S%:z)
@@ -132,12 +221,17 @@ let
       ]
     }')
 
-    EVENTS=$($CURL -s -X POST "http://localhost:5600/api/0/query/" \
+    if EVENTS=$($CURL -sf -X POST "http://localhost:5600/api/0/query/" \
       -H "Content-Type: application/json" \
-      -d "$PAYLOAD" 2>/dev/null | $JQ '.[0] // []' 2>/dev/null)
+      -d "$PAYLOAD" 2>/dev/null | $JQ '.[0] // []' 2>/dev/null); then
+      :
+    else
+      printf '{"text":"󱎫 ?","tooltip":"ActivityWatch data unavailable. Right-click to pause recording","class":"error"}\n'
+      exit 0
+    fi
 
     if [ -z "$EVENTS" ] || [ "$EVENTS" = "null" ] || [ "$EVENTS" = "[]" ]; then
-      printf '{"text":"󱎫 --","tooltip":"No activity data","class":"idle"}\n'
+      printf '{"text":"󱎫 --","tooltip":"No activity data. Right-click to pause recording","class":"idle"}\n'
       exit 0
     fi
 
@@ -145,7 +239,7 @@ let
     MINS=$((TOTAL_SECS / 60))
 
     if [ "$MINS" -lt 1 ]; then
-      printf '{"text":"󱎫 --","tooltip":"No activity data","class":"idle"}\n'
+      printf '{"text":"󱎫 --","tooltip":"No activity data. Right-click to pause recording","class":"idle"}\n'
       exit 0
     fi
 
@@ -182,9 +276,55 @@ let
     ' 2>/dev/null)
 
     [ -z "$TOOLTIP" ] && TOOLTIP="No breakdown available"
+    TOOLTIP=$(printf '%s\n\nRight-click to pause recording' "$TOOLTIP")
 
     $JQ -nc --arg text "$TEXT" --arg tooltip "$TOOLTIP" --arg class "$CLASS" \
       '{text: $text, tooltip: $tooltip, class: $class}'
+  '';
+
+  activityWatchToggleScript = pkgs.writeShellScript "timetrack-toggle" ''
+    set -euo pipefail
+    SYSTEMCTL=${pkgs.systemd}/bin/systemctl
+    NOTIFY_SEND=${pkgs.libnotify}/bin/notify-send
+    PKILL=${pkgs.procps}/bin/pkill
+
+    if WATCHER_STATE=$("$SYSTEMCTL" --user show --property=ActiveState --value aw-awatcher.service 2>/dev/null); then
+      :
+    else
+      "$NOTIFY_SEND" -u critical "ActivityWatch error" "Failed to determine recording status." || true
+      exit 1
+    fi
+
+    case "$WATCHER_STATE" in
+      active)
+        if "$SYSTEMCTL" --user stop aw-awatcher.service; then
+          TITLE="ActivityWatch paused"
+          MESSAGE="Recording paused. Right-click to resume."
+        else
+          "$NOTIFY_SEND" -u critical "ActivityWatch error" "Failed to pause recording." || true
+          exit 1
+        fi
+        ;;
+      inactive)
+        if "$SYSTEMCTL" --user start aw-awatcher.service; then
+          TITLE="ActivityWatch resumed"
+          MESSAGE="Recording resumed."
+        else
+          "$NOTIFY_SEND" -u critical "ActivityWatch error" "Failed to resume recording." || true
+          exit 1
+        fi
+        ;;
+      *)
+        "$NOTIFY_SEND" -u critical "ActivityWatch error" "Cannot toggle recording while the watcher is $WATCHER_STATE." || true
+        exit 1
+        ;;
+    esac
+
+    if ! "$PKILL" -RTMIN+11 waybar 2>/dev/null; then
+      "$NOTIFY_SEND" -u critical "ActivityWatch error" "Recording changed, but Waybar could not refresh." || true
+      exit 1
+    fi
+    "$NOTIFY_SEND" -u low "$TITLE" "$MESSAGE"
   '';
 
   # Show LED matrix brightness; hides when /dev/ttyACM0 is absent
@@ -317,10 +457,15 @@ in
           };
         };
 
-        clock = {
+        "clock#time" = {
           interval = 1;
           format = " {:%H:%M:%S}";
-          format-alt = " {:%a, %d %b %Y}";
+          tooltip = false;
+        };
+
+        "clock#date" = {
+          interval = 60;
+          format = " {:%a %d %b}";
           on-click-right = "kitty --hold --class floating-calendar --title Calendar -e khal interactive";
           tooltip = false;
         };
@@ -470,9 +615,10 @@ in
         # module with ddcutil is only shown on external monitors (see modules-right).
 
         bluetooth = {
-          format = "󰂯 {status}";
+          format = "󰂯";
           format-connected = "󰂱 {device_alias}";
           format-off = "󰂲";
+          format-no-controller = "󰂲";
           tooltip-format = "{controller_alias}\n{controller_address}\n\n{num_connections} connected";
           on-click = "blueman-manager";
         };
@@ -533,9 +679,11 @@ in
         "custom/timetrack" = {
           interval = 60;
           return-type = "json";
+          signal = 11;
           exec = "${timetrackScript}";
           format = "{}";
           on-click = "xdg-open \"http://localhost:5600/#/activity/$(hostname)/view/\"";
+          on-click-right = "${activityWatchToggleScript}";
         };
 
         "custom/ledmatrix" = {
@@ -568,7 +716,7 @@ in
           "hyprland/workspaces"
           "hyprland/window"
         ];
-        modules-center = [ "clock" ];
+        modules-center = [ ];
         modules-right = [
           "custom/timetrack"
           "custom/media"
@@ -589,6 +737,8 @@ in
           "power-profiles-daemon"
           "custom/notification"
           "tray"
+          "clock#date"
+          "clock#time"
           "custom/power"
         ];
       };
@@ -633,6 +783,8 @@ in
               "power-profiles-daemon"
               "custom/notification"
               "tray"
+              "clock#date"
+              "clock#time"
               "custom/power"
             ];
           }
@@ -657,13 +809,17 @@ in
 
         /* ── Floating pill groups ── */
         .modules-left,
-        .modules-center,
         .modules-right {
           background: #282a36;
           border-radius: 14px;
           padding: 0 8px;
           margin: 5px 4px;
           box-shadow: none;
+        }
+        .modules-center {
+          background: transparent;
+          padding: 0;
+          margin: 0;
         }
 
         /* Pack the right pill toward center instead of spreading across the bar */
@@ -720,11 +876,15 @@ in
         }
 
         /* ── Clock ── */
-        #clock {
+        #clock.date {
           color: #f8f8f2;
           font-weight: bold;
-          font-size: 15px;
-          padding: 2px 10px 0 10px;
+          padding: 0 4px 0 10px;
+        }
+        #clock.time {
+          color: #f8f8f2;
+          font-weight: bold;
+          padding: 0 10px 0 4px;
         }
 
         /* ── Shared right-module padding ── */
@@ -753,6 +913,7 @@ in
         #custom-timetrack         { color: #f1fa8c; padding: 0 10px; }
         #custom-timetrack.warning  { color: #ffb86c; }
         #custom-timetrack.critical { color: #ff5555; }
+        #custom-timetrack.paused   { color: #6272a4; }
         #custom-media.empty { padding: 0; margin: 0; }
         #custom-media        { color: #50fa7b; }
         #custom-media.Paused { color: #6272a4; }
@@ -855,12 +1016,7 @@ in
         window#waybar:not(.eDP-1) * {
           font-size: 12px;
         }
-        window#waybar:not(.eDP-1) #clock {
-          font-size: 13px;
-          padding: 0 12px;
-        }
         window#waybar:not(.eDP-1) .modules-left,
-        window#waybar:not(.eDP-1) .modules-center,
         window#waybar:not(.eDP-1) .modules-right {
           margin: 4px 4px;
         }
