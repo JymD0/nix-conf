@@ -164,10 +164,19 @@ in
     # Apps
     discord
     prismlauncher  # Minecraft launcher
+    r2modman       # Thunderstore mod manager
+    mgba           # Game Boy Advance emulator
     foxglove-studio
     pinta
     vlc
     thunderbird
+    vivaldi       # Chromium-based browser
+
+    # 3D printing (Kobra S1 runs Rinkhals, so Orca can talk to its Moonraker)
+    f3d                # quick STL/3MF/OBJ viewer
+    orca-slicer
+    freecad
+    openscad-unstable  # the 2021 release is ancient, this one has the fast manifold backend
 
     # Fonts
     noto-fonts-color-emoji
@@ -326,6 +335,9 @@ in
         "application/x-extension-xht" = "zen.desktop";
         "application/x-extension-xhtml" = "zen.desktop";
         "application/xhtml+xml" = "zen.desktop";
+        "model/3mf" = "f3d.desktop";
+        "model/obj" = "f3d.desktop";
+        "model/stl" = "f3d.desktop";
         "text/html" = "zen.desktop";
         "x-scheme-handler/chrome" = "zen.desktop";
         "x-scheme-handler/claude-cli" = "claude-code-url-handler.desktop";
