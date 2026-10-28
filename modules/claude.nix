@@ -8,11 +8,13 @@
 
 let
   computer-use-pkg = import ./computer-use.nix { inherit pkgs; };
+  stalwart-mail-pkg = import ./stalwart-mail.nix { inherit pkgs; };
 in
 {
   home.packages = [
     claude-code.packages.${pkgs.stdenv.hostPlatform.system}.default
     computer-use-pkg
+    stalwart-mail-pkg
   ];
 
   # ─── Claude Code ────────────────────────────────────────────────────────────
@@ -29,6 +31,9 @@ in
       ${claude-cli}/bin/claude mcp remove --scope user hypr-computer-use 2>/dev/null || true
       ${claude-cli}/bin/claude mcp add --scope user --transport stdio hypr-computer-use -- \
         ${computer-use-pkg}/bin/computer-use-server
+      ${claude-cli}/bin/claude mcp remove --scope user stalwart-mail 2>/dev/null || true
+      ${claude-cli}/bin/claude mcp add --scope user --transport stdio stalwart-mail -- \
+        ${stalwart-mail-pkg}/bin/stalwart-mail-server
     '';
 
   # Global preferences (applies to every session across all projects)

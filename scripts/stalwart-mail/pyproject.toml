@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stalwart-mail"
+version = "0.1.0"
+dependencies = ["mcp"]
+
+[project.scripts]
+stalwart-mail-server = "stalwart_mail.server:main"
+
+[tool.setuptools]
+packages = ["stalwart_mail"]
